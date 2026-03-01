@@ -28,7 +28,7 @@
     "default_title": "iikiti Feed Reader"
   },
   "options_ui": {
-    "page": "reader.html",
+    "page": "reader",
     "open_in_tab": true
   },
   "content_scripts": [
