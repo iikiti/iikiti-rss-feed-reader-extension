@@ -24,11 +24,11 @@
     "type": "module"
   },
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "popup/index.html",
     "default_title": "iikiti Feed Reader"
   },
   "options_ui": {
-    "page": "reader",
+    "page": "reader/index.html",
     "open_in_tab": true
   },
   "content_scripts": [
@@ -40,7 +40,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["popup.html", "reader.html", "background.js", "content.js"],
+      "resources": ["popup/index.html", "reader/index.html", "background.js", "content.js"],
       "matches": ["<all_urls>"]
     }
   ]

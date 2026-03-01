@@ -7,13 +7,21 @@ async function extractInlineScripts() {
     
     for (const file of htmlFiles) {
         let content = fs.readFileSync(file, 'utf-8');
-        const scriptRegex = /<script>([\s\S]*?)<\/script>/gi;
+        const scriptRegex = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
         let match;
         let scriptIndex = 0;
         
         while ((match = scriptRegex.exec(content)) !== null) {
             let scriptContent = match[1];
+            const fullMatch = match[0];
+            const openTagMatch = fullMatch.match(/<script\b([^>]*)>/i);
+            const openTagAttrs = openTagMatch ? openTagMatch[1] : '';
             
+            let attributes = '';
+            if (openTagAttrs.includes('type="module"')) {
+                attributes = ' type="module"';
+            }
+
             // Remove the inline script from the HTML
             const scriptName = `${path.basename(file, '.html')}-inline-${scriptIndex++}.js`;
             const scriptPath = path.join(path.dirname(file), scriptName);
@@ -22,7 +30,7 @@ async function extractInlineScripts() {
             fs.writeFileSync(scriptPath, scriptContent);
             
             // Replace the inline script with an external reference
-            content = content.replace(match[0], `<script src="./${scriptName}"></script>`);
+            content = content.replace(fullMatch, `<script src="./${scriptName}"${attributes}></script>`);
         }
         
         // Remove CSP meta tag added by SvelteKit to allow standard extension CSP to work
