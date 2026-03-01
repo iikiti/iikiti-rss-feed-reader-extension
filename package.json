@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "vite dev",
-    "build": "npm run build:scripts && vite build && node scripts/extract-inline.js",
+    "build": "vite build && node scripts/extract-inline.js && npm run build:scripts",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
-    "build:worker": "esbuild src/background/index.ts --bundle --outfile=static/background.js --format=esm",
-    "build:scripts": "esbuild src/background/index.ts --bundle --outfile=static/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=static/content.js --format=esm"
+    "build:worker": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm",
+    "build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm && cp src/manifest.json build/manifest.json"
   },
   "devDependencies": {
     "@sveltejs/adapter-auto": "^3.3.1",
