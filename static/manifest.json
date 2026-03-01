@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "iikiti RSS Feed Reader",
   "version": "1.0",
-  "description": "Cross-browser RSS feed reader extension.",
+  "description": "Cross-browser RSS feed reader web extension.",
   "permissions": [
     "storage",
     "unlimitedStorage",
