@@ -3,6 +3,31 @@ export interface ParsedFeed {
   items: ParsedItem[];
 }
 
+/**
+ * Decodes XML/HTML encoded characters in a string.
+ * Handles entities like &lt;, &gt;, &amp;, &quot;, &apos;, and numeric character references.
+ */
+export function decodeHtmlEntities(text: string): string {
+  if (!text) return text;
+  
+  // Use a textarea element to decode HTML entities
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+}
+
+/**
+ * Decodes XML/HTML encoded characters in content fields of a ParsedItem.
+ */
+function decodeItemContent(item: ParsedItem): ParsedItem {
+  return {
+    ...item,
+    title: decodeHtmlEntities(item.title),
+    content: decodeHtmlEntities(item.content),
+    snippet: decodeHtmlEntities(item.snippet),
+  };
+}
+
 export interface ParsedItem {
   title: string;
   link: string;
@@ -15,25 +40,28 @@ export interface ParsedItem {
 }
 
 export async function fetchAndParseFeed(url: string): Promise<ParsedFeed> {
-  const response = await fetch(url);
-  const text = await response.text();
-  const feed = parseFeed(text);
-  
-  // Extract images for items that don't have them
-  const itemsWithImages = await Promise.all(feed.items.map(async (item) => {
-    if (!item.image && item.link) {
-      const image = await extractImageFromArticle(item.link);
-      if (image) {
-        return { ...item, image };
-      }
-    }
-    return item;
-  }));
-  
-  return {
-    ...feed,
-    items: itemsWithImages
-  };
+	const response = await fetch(url);
+	const text = await response.text();
+	const feed = parseFeed(text);
+
+	// Extract images for items that don't have them
+	const itemsWithImages = await Promise.all(
+		feed.items.map(async (item) => {
+			if (!item.image && item.link) {
+				const image = await extractImageFromArticle(item.link);
+				if (image) {
+					console.log(`Image successfully acquired for ${url}: ${image}`);
+					return { ...item, image };
+				}
+			}
+			return item;
+		})
+	);
+
+	return {
+		...feed,
+		items: itemsWithImages
+	};
 }
 
 async function extractImageFromArticle(articleUrl: string): Promise<string | undefined> {
@@ -113,7 +141,8 @@ function parseRssFeed(xml: Document): ParsedFeed {
       image = enclosureUrl;
     }
     
-    return {
+    // Decode XML/HTML entities in content
+    const decodedItem = decodeItemContent({
       title,
       link,
       content,
@@ -121,7 +150,9 @@ function parseRssFeed(xml: Document): ParsedFeed {
       guid,
       pubDate,
       image,
-    };
+    });
+    
+    return decodedItem;
   });
 
   return {
@@ -166,7 +197,8 @@ function parseAtomFeed(xml: Document): ParsedFeed {
       }
     }
     
-    return {
+    // Decode XML/HTML entities in content
+    const decodedItem = decodeItemContent({
       title,
       link,
       content,
@@ -175,7 +207,9 @@ function parseAtomFeed(xml: Document): ParsedFeed {
       pubDate,
       author,
       image,
-    };
+    });
+    
+    return decodedItem;
   });
 
   return {
