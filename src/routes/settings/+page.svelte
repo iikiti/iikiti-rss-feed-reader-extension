@@ -6,10 +6,11 @@
 
   onMount(() => {
     if (browser) {
-      const stored = localStorage.getItem('refreshInterval');
-      if (stored) {
-        refreshInterval = parseInt(stored, 10);
-      }
+      chrome.storage.local.get('refreshInterval').then((result: { refreshInterval?: number }) => {
+        if (result.refreshInterval) {
+          refreshInterval = result.refreshInterval;
+        }
+      });
     }
   });
 
@@ -17,7 +18,7 @@
     const target = event.target as HTMLSelectElement;
     refreshInterval = parseInt(target.value, 10);
     if (browser) {
-      localStorage.setItem('refreshInterval', String(refreshInterval));
+      chrome.storage.local.set({ refreshInterval });
     }
   }
 </script>

@@ -3,10 +3,6 @@ import { onMount } from 'svelte';
 import { browser } from '$app/environment';
 import { db, type Feed, type Folder, type View, type Article } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
-import { Temporal, Intl, toTemporalInstant } from '@js-temporal/polyfill';
-
-// Add Temporal polyfill to Date prototype
-Date.prototype.toTemporalInstant = toTemporalInstant;
 
 let feeds: Feed[] = [];
 let folders: Folder[] = [];
@@ -21,27 +17,6 @@ let selectedViewId: number | null = null;
 let selectedFolderId: number | null = null;
 let selectedFeedId: number | null = null;
 let searchQuery = '';
-let refreshInterval = 15;
-let refreshTimer: ReturnType<typeof setInterval> | null = null;
-const feedLastRefreshKey = 'feeds_last_refresh';
-let lastRefresh: Date | null = ((): Date | null => {
-	const storedValue = browser ? localStorage.getItem(feedLastRefreshKey) : null;
-
-	// If null, undefined, or empty string, return new Date()
-	if (!storedValue) {
-		return null;
-	}
-
-	const parsedDate = new Date(storedValue);
-
-	// Check if the string was actually a valid date format
-	// (new Date('invalid') returns 'Invalid Date', which is a Date object where getTime() is NaN)
-	if(isNaN(parsedDate.getTime())) {
-		return null;
-	}
-
-	return parsedDate;
-})();
   
 // Feed form
 let feedUrl = '';
@@ -117,72 +92,22 @@ let folderSearchQuery = '';
 
   onMount(async () => {
     await loadData();
+    
+    // Listen for refresh complete messages from background script
     if (browser) {
-		const stored = localStorage.getItem('refreshInterval');
-		if (stored) { refreshInterval = parseInt(stored, 10); }
-		console.info(`Feed refresh interval: ${refreshInterval} minutes.`);
-		console.info(
-			`Last feed refresh was ` +
-			(
-				lastRefresh === null ?
-					'never' :
-					lastRefresh.toLocaleString()
-			)
-		);
-		startRefreshTimer();
+      chrome.runtime.onMessage.addListener((message) => {
+        if (message.type === 'refresh-complete') {
+          loadData();
+        }
+      });
     }
   });
 
-  function startRefreshTimer() {
-    if (refreshTimer) clearInterval(refreshTimer);
-	let nextRefresh: Temporal.Instant = lastRefresh ?
-		lastRefresh.toTemporalInstant().add({ 'minutes': refreshInterval }) :
-		Temporal.Now.instant();
-	if(Temporal.Instant.compare(nextRefresh, Temporal.Now.instant()) <= 0) {
-		refreshAllFeeds();
-	}
-    refreshTimer = setInterval(async () => { await refreshAllFeeds(); }, refreshInterval * 60 * 1000);
-  }
-
-  async function refreshAllFeeds() {
-	console.info('Refreshing feeds now...');
-	lastRefresh = new Date();
-	localStorage.setItem(feedLastRefreshKey, lastRefresh.toString());
-    for (const feed of feeds) {
-      try {
-        const parsedFeed = await fetchAndParseFeed(feed.url);
-        const existingArticles = await db.articles.where('feedId').equals(feed.id!).toArray();
-        const existingGuids = new Set(existingArticles.map(a => a.guid));
-        const newArticles = parsedFeed.items.filter(item => !existingGuids.has(item.guid)).map(item => ({
-          feedId: feed.id!,
-          guid: item.guid,
-          title: item.title,
-          link: item.link,
-          content: item.content,
-          snippet: item.snippet,
-          pubDate: item.pubDate,
-          read: false,
-          starred: false,
-          author: item.author,
-          image: item.image
-        }));
-		console.group(`Refreshing feed: ${feed.title} (${feed.url}).`);
-		console.info('Parsed feed:', parsedFeed);
-		console.info('New articles:', newArticles);
-		console.groupEnd();
-        if (newArticles.length > 0) await db.articles.bulkAdd(newArticles);
-        await db.feeds.update(feed.id!, { lastFetched: Date.now(), error: undefined });
-      } catch (err) {
-        await db.feeds.update(feed.id!, { error: String(err) });
-      }
+  function refreshFeeds() {
+    // Send message to background to refresh feeds
+    if (browser) {
+      chrome.runtime.sendMessage({ type: 'refresh-feeds' });
     }
-    await loadData();
-  }
-  
-  function updateRefreshInterval(minutes: number) {
-    refreshInterval = minutes;
-    if (browser) { localStorage.setItem('refreshInterval', String(minutes)); }
-    startRefreshTimer();
   }
 
   async function loadData() {
@@ -236,17 +161,32 @@ let folderSearchQuery = '';
       new URL(feedUrl);
       if (editingId) {
         await db.feeds.update(editingId, { title: feedTitle, url: feedUrl, folderId: feedFolderId || undefined });
+        closeModal(); await loadData();
       } else {
         const existing = await db.feeds.where('url').equals(feedUrl).first();
         if (existing) { feedError = 'This feed already exists'; feedLoading = false; return; }
-        const parsed = await fetchAndParseFeed(feedUrl);
-		// parsed.title is title of feed from url
-        const feedId = await db.feeds.add({ url: feedUrl, title: feedTitle, folderId: feedFolderId || undefined });
-        const articles = parsed.items.slice(0, 10).map(item => ({ feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author, image: item.image }));
-        await db.articles.bulkAdd(articles);
+        
+        // Send message to background to add the feed and fetch articles
+        if (browser) {
+          const response = await chrome.runtime.sendMessage({ 
+            type: 'add-feed', 
+            feedUrl, 
+            feedTitle, 
+            feedFolderId 
+          });
+          if (!response.success) {
+            throw new Error(response.error || 'Failed to add feed');
+          }
+        } else {
+          // Fallback for non-browser environment
+          const parsed = await fetchAndParseFeed(feedUrl);
+          const feedId = await db.feeds.add({ url: feedUrl, title: feedTitle, folderId: feedFolderId || undefined });
+          const articles = parsed.items.slice(0, 10).map(item => ({ feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author, image: item.image }));
+          await db.articles.bulkAdd(articles);
+        }
+        closeModal(); await loadData();
       }
-      closeModal(); await loadData();
-    } catch (err) { feedError = 'Failed to add feed. Check URL.'; console.error(err); }
+    } catch (err: any) { feedError = err.message || 'Failed to add feed. Check URL.'; console.error(err); }
     finally { feedLoading = false; }
   }
 
@@ -408,7 +348,7 @@ let folderSearchQuery = '';
 
   <main class="flex-1 flex flex-col">
     <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-      <h2 class="font-semibold text-lg">{currentTitle} <button on:click={() => refreshAllFeeds()}>Refresh</button></h2>
+      <h2 class="font-semibold text-lg">{currentTitle} <button on:click={() => refreshFeeds()}>Refresh</button></h2>
       <div class="flex items-center gap-2">
         <input type="search" placeholder="Search..." bind:value={searchQuery} class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700" />
       </div>

@@ -1,16 +1,45 @@
 import { db } from '../lib/db';
+import { fetchAndParseFeed } from '../lib/feed';
 
-// Create the refresh alarm
-chrome.alarms.create("refresh", { periodInMinutes: 15 });
+// Default refresh interval in minutes
+const DEFAULT_REFRESH_INTERVAL = 15;
+
+// Create the refresh alarm - fires immediately then periodically
+async function createRefreshAlarm() {
+  // Get refresh interval from storage, default to 15 minutes
+  const result = await chrome.storage.local.get('refreshInterval') as { refreshInterval?: number };
+  const interval: number = result.refreshInterval || DEFAULT_REFRESH_INTERVAL;
+  
+  chrome.alarms.create("refresh" as string, { periodInMinutes: interval } as chrome.alarms.AlarmCreateInfo);
+}
+
+// Create the alarm and refresh on load
+createRefreshAlarm();
+
+// Listen for storage changes to update the alarm
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.refreshInterval) {
+    // Recreate the alarm with the new interval
+    chrome.alarms.clear("refresh").then(() => {
+      createRefreshAlarm();
+    });
+  }
+});
 
 // Refresh feeds when the extension loads
 refreshAllFeeds();
 
-// Listen for messages from the page to trigger refresh
+// Listen for messages from the page to trigger refresh or add feed
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'refresh-feeds') {
     refreshAllFeeds();
     sendResponse({ success: true });
+  } else if (message.type === 'add-feed') {
+    // Add a new feed and refresh it
+    handleAddFeed(message.feedUrl, message.feedTitle, message.feedFolderId)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: String(err) }));
+    return true; // async response
   }
   return true;
 });
@@ -67,6 +96,46 @@ async function refreshAllFeeds() {
   }
 
   // Send "refresh-complete" message to all tabs
+  chrome.tabs.query({}).then(tabs => {
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: 'refresh-complete' }).catch(() => {
+          // Tab may not have a listener, ignore error
+        });
+      }
+    }
+  });
+}
+
+async function handleAddFeed(feedUrl: string, feedTitle: string, feedFolderId: number | null | undefined) {
+  // Parse the feed
+  const parsedFeed = await fetchAndParseFeed(feedUrl);
+  
+  // Add the feed to the database
+  const feedId = await db.feeds.add({ 
+    url: feedUrl, 
+    title: feedTitle, 
+    folderId: feedFolderId || undefined 
+  });
+  
+  // Add the articles from the feed
+  const articles = parsedFeed.items.slice(0, 10).map(item => ({
+    feedId: feedId as number,
+    guid: item.guid,
+    title: item.title,
+    link: item.link,
+    content: item.content,
+    snippet: item.snippet,
+    pubDate: item.pubDate,
+    read: false,
+    starred: false,
+    author: item.author,
+    image: item.image
+  }));
+  
+  await db.articles.bulkAdd(articles);
+  
+  // Notify tabs to refresh
   chrome.tabs.query({}).then(tabs => {
     for (const tab of tabs) {
       if (tab.id) {
