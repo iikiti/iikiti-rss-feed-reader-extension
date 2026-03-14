@@ -62,95 +62,72 @@ export async function fetchAndParseFeed(url: string): Promise<ParsedFeed> {
 	const text = await response.text();
 	const feed = parseFeed(text);
 
-	// Extract images and site content for items
-	const itemsWithImages = await Promise.all(
+	// Extract images and site content for items in a single fetch
+	const itemsWithData = await Promise.all(
 		feed.items.map(async (item) => {
-			let updatedItem = { ...item };
-			
-			// Extract image if not present
-			if (!updatedItem.image && updatedItem.link) {
-				const image = await extractImageFromArticle(updatedItem.link);
-				if (image) {
-					console.log(`Image successfully acquired for ${url}: ${image}`);
-					updatedItem = { ...updatedItem, image };
+			// Only fetch if we need image or site content
+			if (!item.image && item.link) {
+				const extracted = await extractImageAndSiteContent(item.link);
+				if (extracted.image || extracted.siteContent) {
+					console.log(`Data successfully acquired for ${item.link}`);
+					return { ...item, ...extracted };
 				}
 			}
-			
-			// Extract site content
-			if (updatedItem.link) {
-				const siteContent = await extractSiteContent(updatedItem.link);
-				if (siteContent) {
-					console.log(`Site content successfully acquired for ${updatedItem.link}`);
-					updatedItem = { ...updatedItem, siteContent };
-				}
-			}
-			
-			return updatedItem;
+			return item;
 		})
 	);
 
 	return {
 		...feed,
-		items: itemsWithImages
+		items: itemsWithData
 	};
 }
 
-async function extractImageFromArticle(articleUrl: string): Promise<string | undefined> {
-  try {
-	console.info('Fetching article for image: ', articleUrl);
-    const response = await fetch(articleUrl);
-    const contentType = response.headers.get("content-type") || "";
-    
-    // Only process HTML pages
-    if (!contentType.includes("text/html")) {
-      throw Error(`Image extraction for ${articleUrl} failed: content-type is ${contentType}, expected text/html`);
-    }
-    
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-    
-    // Try Open Graph image
-    const ogImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
-    if (ogImage) return ogImage;
-    
-    // Try Twitter image
-    const twitterImage = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
-    if (twitterImage) return twitterImage;
-    
-    // Try other common meta image tags
-    const metaImage = doc.querySelector('meta[name="image"]')?.getAttribute("content");
-    if (metaImage) return metaImage;
-    
-    return undefined;
-  } catch (e) {
-    console.warn('Failed to extract image from article:', articleUrl, e);
-    return undefined;
-  }
+interface ExtractedData {
+  image?: string;
+  siteContent?: string;
 }
 
 /**
- * Extracts the main content from an article page, stripping ads, sidebars, headers, footers, etc.
+ * Extracts both image and site content from an article page in a single fetch.
  */
-async function extractSiteContent(articleUrl: string): Promise<string | undefined> {
+async function extractImageAndSiteContent(articleUrl: string): Promise<ExtractedData> {
   try {
-    console.info('Fetching article for site content: ', articleUrl);
+    console.info('Fetching article for image and site content: ', articleUrl);
     const response = await fetch(articleUrl);
     const contentType = response.headers.get("content-type") || "";
     
     // Only process HTML pages
     if (!contentType.includes("text/html")) {
-      throw Error(`Site content extraction for ${articleUrl} failed: content-type is ${contentType}, expected text/html`);
+      throw Error(`Extraction for ${articleUrl} failed: content-type is ${contentType}, expected text/html`);
     }
     
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     
-    // Try to find the main article content using common selectors
-    let content: Element | null = null;
+    const result: ExtractedData = {};
     
-    // Try common article content selectors in order of preference
+    // Extract image - Try Open Graph image
+    const ogImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
+    if (ogImage) {
+      result.image = ogImage;
+    } else {
+      // Try Twitter image
+      const twitterImage = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
+      if (twitterImage) {
+        result.image = twitterImage;
+      } else {
+        // Try other common meta image tags
+        const metaImage = doc.querySelector('meta[name="image"]')?.getAttribute("content");
+        if (metaImage) {
+          result.image = metaImage;
+        }
+      }
+    }
+    
+    // Extract site content - Try to find the main article content using common selectors
+    let content: Element | null = null;
     const contentSelectors = [
       'article',
       '[role="main"]',
@@ -175,58 +152,61 @@ async function extractSiteContent(articleUrl: string): Promise<string | undefine
       content = doc.body;
     }
     
-    if (!content) return undefined;
-    
-    // Clone the content to manipulate it without affecting the original
-    const contentClone = content.cloneNode(true) as Element;
-    
-    // Remove unwanted elements
-    const removeSelectors = [
-      'script', 'style', 'iframe', 'noscript',
-      'nav', 'header', 'footer', 'aside',
-      '.ad', '.ads', '.advertisement', '.advert',
-      '.sidebar', '.side-bar', '.widget',
-      '.nav', '.navigation', '.menu', '.navbar',
-      '.header', '.head', '.footer', '.bottom',
-      '.social', '.share', '.sharing',
-      '.comments', '.comment', '#comments',
-      '.related', '.recommended',
-      '.popup', '.modal', '.overlay',
-      '.newsletter', '.subscribe', '.subscription',
-      'form', 'button', 'input', 'select', 'textarea'
-    ];
-    
-    for (const selector of removeSelectors) {
-      const elements = contentClone.querySelectorAll(selector);
-      elements.forEach(el => el.remove());
+    if (content) {
+      // Clone the content to manipulate it without affecting the original
+      const contentClone = content.cloneNode(true) as Element;
+      
+      // Remove unwanted elements
+      const removeSelectors = [
+        'script', 'style', 'iframe', 'noscript',
+        'nav', 'header', 'footer', 'aside',
+        '.ad', '.ads', '.advertisement', '.advert',
+        '.sidebar', '.side-bar', '.widget',
+        '.nav', '.navigation', '.menu', '.navbar',
+        '.header', '.head', '.footer', '.bottom',
+        '.social', '.share', '.sharing',
+        '.comments', '.comment', '#comments',
+        '.related', '.recommended',
+        '.popup', '.modal', '.overlay',
+        '.newsletter', '.subscribe', '.subscription',
+        'form', 'button', 'input', 'select', 'textarea'
+      ];
+      
+      for (const selector of removeSelectors) {
+        const elements = contentClone.querySelectorAll(selector);
+        elements.forEach(el => el.remove());
+      }
+      
+      // Get text content, preserving paragraph structure
+      let textContent = '';
+      const paragraphs = contentClone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+      
+      if (paragraphs.length > 0) {
+        paragraphs.forEach(p => {
+          const text = p.textContent?.trim();
+          if (text && text.length > 20) {
+            textContent += '<p>' + text + '</p>';
+          }
+        });
+      } else {
+        textContent = contentClone.textContent || '';
+      }
+      
+      // Clean up the content
+      textContent = textContent
+        .replace(/\s+/g, ' ')
+        .replace(/<p>\s*<\/p>/g, '')
+        .trim();
+      
+      if (textContent) {
+        result.siteContent = textContent;
+      }
     }
     
-    // Get text content, preserving paragraph structure
-    let textContent = '';
-    const paragraphs = contentClone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
-    
-    if (paragraphs.length > 0) {
-      paragraphs.forEach(p => {
-        const text = p.textContent?.trim();
-        if (text && text.length > 20) { // Only include substantial paragraphs
-          textContent += '<p>' + text + '</p>';
-        }
-      });
-    } else {
-      // Fallback: just get the text content
-      textContent = contentClone.textContent || '';
-    }
-    
-    // Clean up the content
-    textContent = textContent
-      .replace(/\s+/g, ' ')
-      .replace(/<p>\s*<\/p>/g, '')
-      .trim();
-    
-    return textContent || undefined;
+    return result;
   } catch (e) {
-    console.warn('Failed to extract site content from article:', articleUrl, e);
-    return undefined;
+    console.warn('Failed to extract image and site content from article:', articleUrl, e);
+    return {};
   }
 }
 
