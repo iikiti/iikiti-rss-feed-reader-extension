@@ -1,9 +1,11 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Feed, type Folder, type View, type Article } from '$lib/db';
+import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 
+let currentUserId: number | null = null;
+let users: { id?: number; name: string; createdAt: number }[] = [];
 let feeds: Feed[] = [];
 let folders: Folder[] = [];
 let views: View[] = [];
@@ -36,6 +38,9 @@ let viewName = '';
 let viewFilterRead: 'all' | 'unread' | 'read' = 'all';
 let viewFilterStarred: 'all' | 'starred' = 'all';
 let viewError = '';
+
+// Sort option
+let sortBy: SortOption = 'pubDateDesc';
 
 // Folder search
 let folderSearchQuery = '';
@@ -91,7 +96,12 @@ let folderSearchQuery = '';
         ? feeds.find(f => f.id === selectedFeedId)?.title || 'Feed'
         : 'All Articles';
 
+  $: currentUserName = users.find(u => u.id === currentUserId)?.name || 'Loading...';
+
+  $: unreadCount = articles.filter(a => !a.read).length;
+
   onMount(async () => {
+    await loadUsers();
     await loadData();
     
     // Listen for refresh complete messages from background script
@@ -104,6 +114,21 @@ let folderSearchQuery = '';
     }
   });
 
+  async function loadUsers() {
+    users = await getAllUsers();
+    currentUserId = await getCurrentUserId();
+  }
+
+  async function switchUser(userId: number) {
+    await setCurrentUserId(userId);
+    currentUserId = userId;
+    // Reset selection state when switching users
+    selectedViewId = null;
+    selectedFolderId = null;
+    selectedFeedId = null;
+    await loadData();
+  }
+
   function refreshFeeds() {
     // Send message to background to refresh feeds
     if (browser) {
@@ -112,16 +137,25 @@ let folderSearchQuery = '';
   }
 
   async function loadData() {
-    feeds = await db.feeds.toArray();
-    folders = await db.folders.toArray();
-    views = await db.views.toArray();
-    articles = await db.articles.orderBy('pubDate').reverse().toArray();
+    if (!currentUserId) {
+      currentUserId = await getCurrentUserId();
+    }
+    feeds = await db.feeds.where('userId').equals(currentUserId).toArray();
+    folders = await db.folders.where('userId').equals(currentUserId).toArray();
+    views = await db.views.where('userId').equals(currentUserId).toArray();
+    articles = await getUserArticlesSorted(currentUserId, sortBy);
   }
 
   function selectAllArticles() { selectedViewId = null; selectedFolderId = null; selectedFeedId = null; }
   function selectView(id: number) { selectedViewId = id; selectedFolderId = null; selectedFeedId = null; }
   function selectFolder(id: number) { selectedViewId = null; selectedFolderId = id; selectedFeedId = null; }
   function selectFeed(id: number) { selectedViewId = null; selectedFolderId = null; selectedFeedId = id; }
+
+  function handleSortChange(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    sortBy = target.value as SortOption;
+    loadData();
+  }
 
   function openAddModal(mode: 'feed' | 'folder' | 'view', item?: Feed | Folder | View) {
     addMode = mode;
@@ -180,9 +214,10 @@ let folderSearchQuery = '';
           }
         } else {
           // Fallback for non-browser environment
+          const userId = await getCurrentUserId();
           const parsed = await fetchAndParseFeed(feedUrl);
-          const feedId = await db.feeds.add({ url: feedUrl, title: feedTitle, folderId: feedFolderId || undefined });
-          const articles = parsed.items.slice(0, 10).map(item => ({ feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author, image: item.image }));
+          const feedId = await db.feeds.add({ userId, url: feedUrl, title: feedTitle, folderId: feedFolderId || undefined });
+          const articles = parsed.items.slice(0, 10).map(item => ({ userId, feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author, image: item.image }));
           await db.articles.bulkAdd(articles);
         }
         closeModal(); await loadData();
@@ -193,23 +228,29 @@ let folderSearchQuery = '';
 
   async function addFolder() {
     if (!folderName.trim()) { folderError = 'Please enter a folder name'; return; }
-    const existing = await db.folders.where('name').equals(folderName.trim()).first();
+    const userId = await getCurrentUserId();
+    const existing = await db.folders.where('userId').equals(userId).and(f => f.name === folderName.trim()).first();
     if (existing && existing.id !== editingId) { folderError = 'Folder already exists'; return; }
     if (editingId) await db.folders.update(editingId, { name: folderName.trim(), parentId: folderParentId || undefined });
-    else await db.folders.add({ name: folderName.trim(), parentId: folderParentId || undefined });
+    else await db.folders.add({ userId, name: folderName.trim(), parentId: folderParentId || undefined });
     closeModal(); await loadData();
   }
 
   async function addView() {
     if (!viewName.trim()) { viewError = 'Please enter a view name'; return; }
+    const userId = await getCurrentUserId();
     const filterJson = JSON.stringify({ read: viewFilterRead, starred: viewFilterStarred });
     if (editingId) await db.views.update(editingId, { name: viewName.trim(), filterJson });
-    else await db.views.add({ name: viewName.trim(), filterJson });
+    else await db.views.add({ userId, name: viewName.trim(), filterJson });
     closeModal(); await loadData();
   }
 
   async function deleteFeed(id: number) {
-    if (confirm('Delete this feed?')) { await db.feeds.delete(id); await db.articles.where('feedId').equals(id).delete(); await loadData(); }
+    if (confirm('Delete this feed?')) { 
+      await db.feeds.delete(id); 
+      await db.articles.where('feedId').equals(id).delete(); 
+      await loadData(); 
+    }
   }
 
   async function deleteFolder(id: number) {
@@ -239,15 +280,58 @@ let folderSearchQuery = '';
   function toggleArticle(id: number) {
     expandedArticleId = expandedArticleId === id ? null : id;
   }
+  
+  /**
+   * Returns the content to display for an article.
+   * - For collapsed view: returns content (strip HTML for snippet) or snippet
+   * - For expanded view: returns the longer of content or siteContent
+   */
+  function getDisplayContent(article: Article): string {
+    const isExpanded = expandedArticleId === article.id;
+    
+    if (isExpanded) {
+      // When expanded, use whichever is longer (content or siteContent)
+      const contentLen = (article.content || '').length;
+      const siteContentLen = (article.siteContent || '').length;
+      
+      if (siteContentLen > contentLen) {
+        return article.siteContent || article.content || article.snippet;
+      } else {
+        return article.content || article.snippet;
+      }
+    } else {
+      // When collapsed, use content for snippet (stripped of HTML)
+      const content = article.content || article.snippet || '';
+      // Strip HTML tags and create a simple text snippet
+      const textOnly = content.replace(/<[^>]*>/g, '').substring(0, 200);
+      return textOnly + (textOnly.length >= 200 ? '...' : '');
+    }
+  }
 </script>
 
 <div class="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
   <aside class="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
-    <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-      <h1 class="text-xl font-bold">iikiti</h1>
-      <div class="flex items-center space-x-1">
-        <button on:click={() => openAddModal('feed')} class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1" title="Add">+</button>
-        <a href="/settings" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
+    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div class="flex justify-between items-center mb-2">
+        <h1 class="text-xl font-bold">iikiti</h1>
+        <div class="flex items-center space-x-1">
+          <button on:click={() => openAddModal('feed')} class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1" title="Add">+</button>
+          <a href="/settings" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
+        </div>
+      </div>
+      <!-- User Switcher -->
+      <div class="text-sm">
+        <label for="user-select" class="text-xs text-gray-500">User:</label>
+        <select 
+          id="user-select"
+          value={currentUserId} 
+          on:change={(e) => switchUser(parseInt(e.currentTarget.value))}
+          class="w-full mt-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-sm"
+        >
+          {#each users as user}
+            <option value={user.id}>{user.name}</option>
+          {/each}
+        </select>
       </div>
     </div>
     <div class="p-2 overflow-y-auto flex-1">
@@ -277,7 +361,7 @@ let folderSearchQuery = '';
       <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
       <ul>
         <li class="group">
-          <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={selectAllArticles} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles</div>
+          <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={selectAllArticles} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount})</span></div>
         </li>
         {#each folders.filter(f => !f.parentId) as folder}
           {@const childFolders = folders.filter(f => f.parentId === folder.id)}
@@ -356,6 +440,16 @@ let folderSearchQuery = '';
       <h2 class="font-semibold text-lg">{currentTitle} <button on:click={() => refreshFeeds()}>Refresh</button></h2>
       <div class="flex items-center gap-2">
         <input type="search" placeholder="Search..." bind:value={searchQuery} class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700" />
+        <select 
+          value={sortBy} 
+          on:change={handleSortChange}
+          class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700"
+        >
+          <option value="pubDateDesc">Newest First</option>
+          <option value="pubDateAsc">Oldest First</option>
+          <option value="titleAsc">Title A-Z</option>
+          <option value="titleDesc">Title Z-A</option>
+        </select>
       </div>
     </header>
     <div class="flex-1 overflow-y-auto p-4">
@@ -364,15 +458,17 @@ let folderSearchQuery = '';
       {:else}
         {#each filteredArticles as article}
           <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md transition-all duration-300 overflow-hidden" class:expanded={expandedArticleId === article.id}>
-            <div class="flex items-start gap-4 cursor-pointer" on:click={() => toggleArticle(article.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && toggleArticle(article.id!)}>
+            <div class="flex items-start gap-4" on:click={() => toggleArticle(article.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && toggleArticle(article.id!)}>
               {#if article.image}
                 <img src={article.image} alt="" class="w-32 h-32 object-cover rounded flex-shrink-0" />
               {/if}
               <div class="flex-1">
-                <h3 class="font-bold text-lg mb-1">{article.title}</h3>
+                <h3 class="font-bold text-lg mb-1">
+                  <a href={article.link} target="_blank" rel="noopener noreferrer" class="hover:underline text-blue-600 dark:text-blue-400" on:click|stopPropagation>{article.title}</a>
+                </h3>
                 <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>
                 <div class="overflow-hidden transition-all duration-300" style="max-height: {expandedArticleId === article.id ? '2000px' : '4.5em'};">
-                  <p class="text-gray-700 dark:text-gray-300">{@html article.content || article.snippet}</p>
+                  <p class="text-gray-700 dark:text-gray-300">{@html getDisplayContent(article)}</p>
                 </div>
               </div>
               <div class="flex items-center gap-2 ml-4" on:click|stopPropagation role="presentation">

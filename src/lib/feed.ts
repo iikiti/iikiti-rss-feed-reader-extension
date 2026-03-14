@@ -24,6 +24,7 @@ function decodeItemContent(item: ParsedItem): ParsedItem {
     ...item,
     title: decodeHtmlEntities(item.title),
     content: decodeHtmlEntities(item.content),
+    siteContent: item.siteContent ? decodeHtmlEntities(item.siteContent) : undefined,
     snippet: decodeHtmlEntities(item.snippet),
   };
 }
@@ -48,6 +49,7 @@ export interface ParsedItem {
   title: string;
   link: string;
   content: string;
+  siteContent?: string;
   snippet: string;
   guid: string;
   pubDate: number; // timestamp
@@ -60,17 +62,30 @@ export async function fetchAndParseFeed(url: string): Promise<ParsedFeed> {
 	const text = await response.text();
 	const feed = parseFeed(text);
 
-	// Extract images for items that don't have them
+	// Extract images and site content for items
 	const itemsWithImages = await Promise.all(
 		feed.items.map(async (item) => {
-			if (!item.image && item.link) {
-				const image = await extractImageFromArticle(item.link);
+			let updatedItem = { ...item };
+			
+			// Extract image if not present
+			if (!updatedItem.image && updatedItem.link) {
+				const image = await extractImageFromArticle(updatedItem.link);
 				if (image) {
 					console.log(`Image successfully acquired for ${url}: ${image}`);
-					return { ...item, image };
+					updatedItem = { ...updatedItem, image };
 				}
 			}
-			return item;
+			
+			// Extract site content
+			if (updatedItem.link) {
+				const siteContent = await extractSiteContent(updatedItem.link);
+				if (siteContent) {
+					console.log(`Site content successfully acquired for ${updatedItem.link}`);
+					updatedItem = { ...updatedItem, siteContent };
+				}
+			}
+			
+			return updatedItem;
 		})
 	);
 
@@ -110,6 +125,107 @@ async function extractImageFromArticle(articleUrl: string): Promise<string | und
     return undefined;
   } catch (e) {
     console.warn('Failed to extract image from article:', articleUrl, e);
+    return undefined;
+  }
+}
+
+/**
+ * Extracts the main content from an article page, stripping ads, sidebars, headers, footers, etc.
+ */
+async function extractSiteContent(articleUrl: string): Promise<string | undefined> {
+  try {
+    console.info('Fetching article for site content: ', articleUrl);
+    const response = await fetch(articleUrl);
+    const contentType = response.headers.get("content-type") || "";
+    
+    // Only process HTML pages
+    if (!contentType.includes("text/html")) {
+      throw Error(`Site content extraction for ${articleUrl} failed: content-type is ${contentType}, expected text/html`);
+    }
+    
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    
+    // Try to find the main article content using common selectors
+    let content: Element | null = null;
+    
+    // Try common article content selectors in order of preference
+    const contentSelectors = [
+      'article',
+      '[role="main"]',
+      'main',
+      '.post-content',
+      '.article-content',
+      '.entry-content',
+      '.content',
+      '.post-body',
+      '.article-body',
+      '#content',
+      '.story-body'
+    ];
+    
+    for (const selector of contentSelectors) {
+      content = doc.querySelector(selector);
+      if (content) break;
+    }
+    
+    // If no content found, try to get the body
+    if (!content) {
+      content = doc.body;
+    }
+    
+    if (!content) return undefined;
+    
+    // Clone the content to manipulate it without affecting the original
+    const contentClone = content.cloneNode(true) as Element;
+    
+    // Remove unwanted elements
+    const removeSelectors = [
+      'script', 'style', 'iframe', 'noscript',
+      'nav', 'header', 'footer', 'aside',
+      '.ad', '.ads', '.advertisement', '.advert',
+      '.sidebar', '.side-bar', '.widget',
+      '.nav', '.navigation', '.menu', '.navbar',
+      '.header', '.head', '.footer', '.bottom',
+      '.social', '.share', '.sharing',
+      '.comments', '.comment', '#comments',
+      '.related', '.recommended',
+      '.popup', '.modal', '.overlay',
+      '.newsletter', '.subscribe', '.subscription',
+      'form', 'button', 'input', 'select', 'textarea'
+    ];
+    
+    for (const selector of removeSelectors) {
+      const elements = contentClone.querySelectorAll(selector);
+      elements.forEach(el => el.remove());
+    }
+    
+    // Get text content, preserving paragraph structure
+    let textContent = '';
+    const paragraphs = contentClone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+    
+    if (paragraphs.length > 0) {
+      paragraphs.forEach(p => {
+        const text = p.textContent?.trim();
+        if (text && text.length > 20) { // Only include substantial paragraphs
+          textContent += '<p>' + text + '</p>';
+        }
+      });
+    } else {
+      // Fallback: just get the text content
+      textContent = contentClone.textContent || '';
+    }
+    
+    // Clean up the content
+    textContent = textContent
+      .replace(/\s+/g, ' ')
+      .replace(/<p>\s*<\/p>/g, '')
+      .trim();
+    
+    return textContent || undefined;
+  } catch (e) {
+    console.warn('Failed to extract site content from article:', articleUrl, e);
     return undefined;
   }
 }

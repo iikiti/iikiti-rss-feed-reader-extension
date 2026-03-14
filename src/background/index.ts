@@ -1,4 +1,4 @@
-import { db } from '../lib/db';
+import { db, getCurrentUserId, type Feed, type Article } from '../lib/db';
 import { fetchAndParseFeed, parseFeed, type ParsedFeed, type ParsedItem } from '../lib/feed';
 
 // Default refresh interval in minutes
@@ -40,6 +40,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: String(err) }));
     return true; // async response
+  } else if (message.type === 'get-current-user') {
+    // Return current user ID
+    getCurrentUserId().then(userId => sendResponse({ userId }));
+    return true;
   }
   return true;
 });
@@ -65,7 +69,11 @@ async function refreshAllFeeds() {
 
   console.info('Refreshing all feeds.');
 
-  const feeds = await db.feeds.toArray();
+  // Get current user ID
+  const userId = await getCurrentUserId();
+  
+  // Only refresh feeds for the current user
+  const feeds = await db.feeds.where('userId').equals(userId).toArray();
   for (const feed of feeds) {
     try {
       const response = await fetch(feed.url);
@@ -75,11 +83,13 @@ async function refreshAllFeeds() {
       const existingArticles = await db.articles.where('feedId').equals(feed.id!).toArray();
       const existingGuids = new Set(existingArticles.map(a => a.guid));
       const newArticles = parsedFeed.items.filter(item => !existingGuids.has(item.guid)).map(item => ({
+        userId,
         feedId: feed.id!,
         guid: item.guid,
         title: item.title,
         link: item.link,
         content: item.content,
+        siteContent: item.siteContent,
         snippet: item.snippet,
         pubDate: item.pubDate,
         read: false,
@@ -112,11 +122,15 @@ async function refreshAllFeeds() {
 
 async function handleAddFeed(feedUrl: string, feedTitle: string, feedFolderId: number | null | undefined) {
 	console.info(`Adding new feed: ${feedTitle} (${feedUrl})`);
+  // Get current user ID
+  const userId = await getCurrentUserId();
+  
   // Parse the feed
   const parsedFeed = await fetchAndParseFeed(feedUrl);
   
   // Add the feed to the database
   const feedId = await db.feeds.add({ 
+    userId,
     url: feedUrl, 
     title: feedTitle, 
     folderId: feedFolderId || undefined 
@@ -124,11 +138,13 @@ async function handleAddFeed(feedUrl: string, feedTitle: string, feedFolderId: n
   
   // Add the articles from the feed
   const articles = parsedFeed.items.slice(0, 10).map(item => ({
+    userId,
     feedId: feedId as number,
     guid: item.guid,
     title: item.title,
     link: item.link,
     content: item.content,
+    siteContent: item.siteContent,
     snippet: item.snippet,
     pubDate: item.pubDate,
     read: false,
@@ -150,5 +166,3 @@ async function handleAddFeed(feedUrl: string, feedTitle: string, feedFolderId: n
     }
   });
 }
-
-
