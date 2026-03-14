@@ -122,7 +122,7 @@ let folderSearchQuery = '';
       startRefreshTimer();
     }
   });
-  
+
   function startRefreshTimer() {
     if (refreshTimer) clearInterval(refreshTimer);
 	console.info(`Feed refresh interval: ${refreshInterval} minutes.`);
