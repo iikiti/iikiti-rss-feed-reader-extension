@@ -17,6 +17,7 @@ let selectedViewId: number | null = null;
 let selectedFolderId: number | null = null;
 let selectedFeedId: number | null = null;
 let searchQuery = '';
+let expandedArticleId: number | null = null;
   
 // Feed form
 let feedUrl = '';
@@ -234,6 +235,10 @@ let folderSearchQuery = '';
 
   async function markAsRead(id: number) { await db.articles.update(id, { read: true }); await loadData(); }
   async function toggleStarred(id: number, current: boolean) { await db.articles.update(id, { starred: !current }); await loadData(); }
+  
+  function toggleArticle(id: number) {
+    expandedArticleId = expandedArticleId === id ? null : id;
+  }
 </script>
 
 <div class="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
@@ -358,20 +363,25 @@ let folderSearchQuery = '';
         <div class="bg-white dark:bg-gray-800 p-4 rounded shadow"><h3 class="font-bold text-lg mb-1">No articles</h3><p class="text-gray-600 dark:text-gray-400 text-sm">Add some feeds to see articles.</p></div>
       {:else}
         {#each filteredArticles as article}
-          <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md">
-            <div class="flex items-start gap-4">
+          <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md transition-all duration-300 overflow-hidden" class:expanded={expandedArticleId === article.id}>
+            <div class="flex items-start gap-4 cursor-pointer" on:click={() => toggleArticle(article.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && toggleArticle(article.id!)}>
               {#if article.image}
                 <img src={article.image} alt="" class="w-32 h-32 object-cover rounded flex-shrink-0" />
               {/if}
               <div class="flex-1">
                 <h3 class="font-bold text-lg mb-1">{article.title}</h3>
                 <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>
-                <p class="text-gray-700 dark:text-gray-300">{@html article.snippet}</p>
+                <div class="overflow-hidden transition-all duration-300" style="max-height: {expandedArticleId === article.id ? '2000px' : '4.5em'};">
+                  <p class="text-gray-700 dark:text-gray-300">{@html article.content || article.snippet}</p>
+                </div>
               </div>
-              <div class="flex items-center gap-2 ml-4">
+              <div class="flex items-center gap-2 ml-4" on:click|stopPropagation role="presentation">
                 <button on:click={() => toggleStarred(article.id!, article.starred)} class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">{article.starred ? '⭐' : '☆'}</button>
                 {#if !article.read}<button on:click={() => markAsRead(article.id!)} class="px-2 py-1 text-xs bg-blue-600 text-white rounded">Mark read</button>{/if}
               </div>
+            </div>
+            <div class="text-center mt-2">
+              <span class="text-xs text-gray-400">{expandedArticleId === article.id ? '▲ Click to collapse' : '▼ Click to read more'}</span>
             </div>
           </div>
         {/each}
