@@ -23,12 +23,13 @@ let selectedFeedId: number | null = null;
 let searchQuery = '';
 let refreshInterval = 15;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
-let lastRefresh: Date = ((): Date => {
-	const storedValue = localStorage.getItem('feeds_last_refresh');
+const feedLastRefreshKey = 'feeds_last_refresh';
+let lastRefresh: Date | null = ((): Date | null => {
+	const storedValue = browser ? localStorage.getItem(feedLastRefreshKey) : null;
 
 	// If null, undefined, or empty string, return new Date()
 	if (!storedValue) {
-		return new Date();
+		return null;
 	}
 
 	const parsedDate = new Date(storedValue);
@@ -36,7 +37,7 @@ let lastRefresh: Date = ((): Date => {
 	// Check if the string was actually a valid date format
 	// (new Date('invalid') returns 'Invalid Date', which is a Date object where getTime() is NaN)
 	if(isNaN(parsedDate.getTime())) {
-		return new Date();
+		return null;
 	}
 
 	return parsedDate;
@@ -117,19 +118,36 @@ let folderSearchQuery = '';
   onMount(async () => {
     await loadData();
     if (browser) {
-      const stored = localStorage.getItem('refreshInterval');
-      if (stored) refreshInterval = parseInt(stored, 10);
-      startRefreshTimer();
+		const stored = localStorage.getItem('refreshInterval');
+		if (stored) { refreshInterval = parseInt(stored, 10); }
+		console.info(`Feed refresh interval: ${refreshInterval} minutes.`);
+		console.info(
+			`Last feed refresh was ` +
+			(
+				lastRefresh === null ?
+					'never' :
+					lastRefresh.toLocaleString()
+			)
+		);
+		startRefreshTimer();
     }
   });
 
   function startRefreshTimer() {
     if (refreshTimer) clearInterval(refreshTimer);
-	console.info(`Feed refresh interval: ${refreshInterval} minutes.`);
+	let nextRefresh: Temporal.Instant = lastRefresh ?
+		lastRefresh.toTemporalInstant().add({ 'minutes': refreshInterval }) :
+		Temporal.Now.instant();
+	if(Temporal.Instant.compare(nextRefresh, Temporal.Now.instant()) <= 0) {
+		refreshAllFeeds();
+	}
     refreshTimer = setInterval(async () => { await refreshAllFeeds(); }, refreshInterval * 60 * 1000);
   }
 
   async function refreshAllFeeds() {
+	console.info('Refreshing feeds now...');
+	lastRefresh = new Date();
+	localStorage.setItem(feedLastRefreshKey, lastRefresh.toString());
     for (const feed of feeds) {
       try {
         const parsedFeed = await fetchAndParseFeed(feed.url);
@@ -145,9 +163,13 @@ let folderSearchQuery = '';
           pubDate: item.pubDate,
           read: false,
           starred: false,
-          author: item.author
+          author: item.author,
+          image: item.image
         }));
-		console.info(`Refreshing feed: ${feed.title} (${feed.url}).`);
+		console.group(`Refreshing feed: ${feed.title} (${feed.url}).`);
+		console.info('Parsed feed:', parsedFeed);
+		console.info('New articles:', newArticles);
+		console.groupEnd();
         if (newArticles.length > 0) await db.articles.bulkAdd(newArticles);
         await db.feeds.update(feed.id!, { lastFetched: Date.now(), error: undefined });
       } catch (err) {
@@ -159,7 +181,7 @@ let folderSearchQuery = '';
   
   function updateRefreshInterval(minutes: number) {
     refreshInterval = minutes;
-    if (browser) localStorage.setItem('refreshInterval', String(minutes));
+    if (browser) { localStorage.setItem('refreshInterval', String(minutes)); }
     startRefreshTimer();
   }
 
@@ -220,7 +242,7 @@ let folderSearchQuery = '';
         const parsed = await fetchAndParseFeed(feedUrl);
 		// parsed.title is title of feed from url
         const feedId = await db.feeds.add({ url: feedUrl, title: feedTitle, folderId: feedFolderId || undefined });
-        const articles = parsed.items.slice(0, 10).map(item => ({ feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author }));
+        const articles = parsed.items.slice(0, 10).map(item => ({ feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author, image: item.image }));
         await db.articles.bulkAdd(articles);
       }
       closeModal(); await loadData();
@@ -386,7 +408,7 @@ let folderSearchQuery = '';
 
   <main class="flex-1 flex flex-col">
     <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-      <h2 class="font-semibold text-lg">{currentTitle}</h2>
+      <h2 class="font-semibold text-lg">{currentTitle} <button on:click={() => refreshAllFeeds()}>Refresh</button></h2>
       <div class="flex items-center gap-2">
         <input type="search" placeholder="Search..." bind:value={searchQuery} class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700" />
       </div>
@@ -397,7 +419,10 @@ let folderSearchQuery = '';
       {:else}
         {#each filteredArticles as article}
           <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md">
-            <div class="flex items-start justify-between">
+            <div class="flex items-start gap-4">
+              {#if article.image}
+                <img src={article.image} alt="" class="w-32 h-32 object-cover rounded flex-shrink-0" />
+              {/if}
               <div class="flex-1">
                 <h3 class="font-bold text-lg mb-1">{article.title}</h3>
                 <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>

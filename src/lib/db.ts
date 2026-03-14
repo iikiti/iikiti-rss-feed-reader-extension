@@ -22,6 +22,7 @@ export interface Article {
   read: boolean; // 0 = unread, 1 = read
   starred: boolean;
   author?: string;
+  image?: string;
 }
 
 export interface Folder {
