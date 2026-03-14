@@ -366,7 +366,7 @@ let folderSearchQuery = '';
               <div class="flex-1">
                 <h3 class="font-bold text-lg mb-1">{article.title}</h3>
                 <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>
-                <p class="text-gray-700 dark:text-gray-300">{article.snippet}</p>
+                <p class="text-gray-700 dark:text-gray-300">{@html article.snippet}</p>
               </div>
               <div class="flex items-center gap-2 ml-4">
                 <button on:click={() => toggleStarred(article.id!, article.starred)} class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">{article.starred ? '⭐' : '☆'}</button>

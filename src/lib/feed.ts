@@ -28,6 +28,22 @@ function decodeItemContent(item: ParsedItem): ParsedItem {
   };
 }
 
+/**
+ * Creates a snippet from content, stripping dangerous tags while preserving basic formatting.
+ */
+function createSnippet(content: string): string {
+  if (!content) return '';
+  // Strip dangerous tags, preserve basic formatting like paragraphs, links, bold, etc.
+  let cleaned = content
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .substring(0, 200);
+  // Remove incomplete tags at the end
+  cleaned = cleaned.replace(/<[^>]*$/, '');
+  return cleaned + '...';
+}
+
 export interface ParsedItem {
   title: string;
   link: string;
@@ -120,7 +136,7 @@ function parseRssFeed(xml: Document): ParsedFeed {
     const description = item.querySelector("description")?.textContent || "";
     const contentEncoded = item.getElementsByTagNameNS("*", "encoded")[0]?.textContent || "";
     const content = contentEncoded || description;
-    const snippet = (description || content).substring(0, 200).replace(/<[^>]+>/g, '') + "...";
+    const snippet = createSnippet(description || content);
     const guid = item.querySelector("guid")?.textContent || link;
     const pubDateStr = item.querySelector("pubDate")?.textContent || "";
     const pubDate = pubDateStr ? new Date(pubDateStr).getTime() : Date.now();
@@ -167,7 +183,7 @@ function parseAtomFeed(xml: Document): ParsedFeed {
     const title = entry.querySelector("title")?.textContent || "No Title";
     const link = entry.querySelector("link")?.getAttribute("href") || "";
     const content = entry.querySelector("content")?.textContent || entry.querySelector("summary")?.textContent || "";
-    const snippet = content.substring(0, 200).replace(/<[^>]+>/g, '') + "...";
+    const snippet = createSnippet(content);
     const guid = entry.querySelector("id")?.textContent || link;
     const pubDateStr = entry.querySelector("published")?.textContent || entry.querySelector("updated")?.textContent || "";
     const pubDate = pubDateStr ? new Date(pubDateStr).getTime() : Date.now();
