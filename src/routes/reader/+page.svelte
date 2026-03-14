@@ -1,44 +1,69 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
-  import { db, type Feed, type Folder, type View, type Article } from '$lib/db';
-  import { fetchAndParseFeed } from '$lib/feed';
+import { onMount } from 'svelte';
+import { browser } from '$app/environment';
+import { db, type Feed, type Folder, type View, type Article } from '$lib/db';
+import { fetchAndParseFeed } from '$lib/feed';
+import { Temporal, Intl, toTemporalInstant } from '@js-temporal/polyfill';
 
-  let feeds: Feed[] = [];
-  let folders: Folder[] = [];
-  let views: View[] = [];
-  let articles: Article[] = [];
-  let showAddModal = false;
-  let addMode: 'feed' | 'folder' | 'view' = 'feed';
-  let editingId: number | null = null;
+// Add Temporal polyfill to Date prototype
+Date.prototype.toTemporalInstant = toTemporalInstant;
+
+let feeds: Feed[] = [];
+let folders: Folder[] = [];
+let views: View[] = [];
+let articles: Article[] = [];
+let showAddModal = false;
+let addMode: 'feed' | 'folder' | 'view' = 'feed';
+let editingId: number | null = null;
+
+// Selection state
+let selectedViewId: number | null = null;
+let selectedFolderId: number | null = null;
+let selectedFeedId: number | null = null;
+let searchQuery = '';
+let refreshInterval = 15;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let lastRefresh: Date = ((): Date => {
+	const storedValue = localStorage.getItem('feeds_last_refresh');
+
+	// If null, undefined, or empty string, return new Date()
+	if (!storedValue) {
+		return new Date();
+	}
+
+	const parsedDate = new Date(storedValue);
+
+	// Check if the string was actually a valid date format
+	// (new Date('invalid') returns 'Invalid Date', which is a Date object where getTime() is NaN)
+	if(isNaN(parsedDate.getTime())) {
+		return new Date();
+	}
+
+	return parsedDate;
+})();
   
-  // Selection state
-  let selectedViewId: number | null = null;
-  let selectedFolderId: number | null = null;
-  let selectedFeedId: number | null = null;
-  let searchQuery = '';
-  let refreshInterval = 15;
-  let refreshTimer: ReturnType<typeof setInterval> | null = null;
-  
-  // Feed form
-  let feedUrl = '';
-  let feedFolderId: number | null = null;
-  let feedError = '';
-  let feedLoading = false;
-  
-  // Folder form
-  let folderName = '';
-  let folderParentId: number | null = null;
-  let folderError = '';
-  
-  // View form
-  let viewName = '';
-  let viewFilterRead: 'all' | 'unread' | 'read' = 'all';
-  let viewFilterStarred: 'all' | 'starred' = 'all';
-  let viewError = '';
-  
-  // Folder search
-  let folderSearchQuery = '';
+// Feed form
+let feedUrl = '';
+let feedTitle = '';
+let feedFolderId: number | null = null;
+let feedError = '';
+let feedLoading = false;
+
+// Folder form
+let folderName = '';
+let folderParentId: number | null = null;
+let folderError = '';
+
+// View form
+let viewName = '';
+let viewFilterRead: 'all' | 'unread' | 'read' = 'all';
+let viewFilterStarred: 'all' | 'starred' = 'all';
+let viewError = '';
+
+// Folder search
+let folderSearchQuery = '';
+
+
   $: filteredFolders = folders.filter(f => 
     f.name.toLowerCase().includes(folderSearchQuery.toLowerCase()) && f.id !== editingId
   );
@@ -100,6 +125,7 @@
   
   function startRefreshTimer() {
     if (refreshTimer) clearInterval(refreshTimer);
+	console.info(`Feed refresh interval: ${refreshInterval} minutes.`);
     refreshTimer = setInterval(async () => { await refreshAllFeeds(); }, refreshInterval * 60 * 1000);
   }
 
@@ -121,6 +147,7 @@
           starred: false,
           author: item.author
         }));
+		console.info(`Refreshing feed: ${feed.title} (${feed.url}).`);
         if (newArticles.length > 0) await db.articles.bulkAdd(newArticles);
         await db.feeds.update(feed.id!, { lastFetched: Date.now(), error: undefined });
       } catch (err) {
@@ -152,7 +179,11 @@
     addMode = mode;
     if (item) {
       editingId = item.id!;
-      if (mode === 'feed') { feedUrl = (item as Feed).url; feedFolderId = (item as Feed).folderId || null; }
+      if (mode === 'feed') {
+		feedTitle = (item as Feed).title;
+		feedUrl = (item as Feed).url;
+		feedFolderId = (item as Feed).folderId || null;
+	  }
       else if (mode === 'folder') { folderName = (item as Folder).name; folderParentId = (item as Folder).parentId || null; }
       else if (mode === 'view') { 
         viewName = (item as View).name; 
@@ -161,7 +192,15 @@
         viewFilterStarred = filter.starred || 'all';
       }
     } else {
-      editingId = null; feedUrl = ''; feedFolderId = null; folderName = ''; folderParentId = null; viewName = ''; viewFilterRead = 'all'; viewFilterStarred = 'all';
+      editingId = null;
+	  feedTitle = '';
+	  feedUrl = '';
+	  feedFolderId = null;
+	  folderName = '';
+	  folderParentId = null;
+	  viewName = '';
+	  viewFilterRead = 'all';
+	  viewFilterStarred = 'all';
     }
     folderSearchQuery = ''; feedError = ''; folderError = ''; viewError = ''; showAddModal = true;
   }
@@ -174,12 +213,13 @@
     try {
       new URL(feedUrl);
       if (editingId) {
-        await db.feeds.update(editingId, { url: feedUrl, folderId: feedFolderId || undefined });
+        await db.feeds.update(editingId, { title: feedTitle, url: feedUrl, folderId: feedFolderId || undefined });
       } else {
         const existing = await db.feeds.where('url').equals(feedUrl).first();
         if (existing) { feedError = 'This feed already exists'; feedLoading = false; return; }
         const parsed = await fetchAndParseFeed(feedUrl);
-        const feedId = await db.feeds.add({ url: feedUrl, title: parsed.title, folderId: feedFolderId || undefined });
+		// parsed.title is title of feed from url
+        const feedId = await db.feeds.add({ url: feedUrl, title: feedTitle, folderId: feedFolderId || undefined });
         const articles = parsed.items.slice(0, 10).map(item => ({ feedId: feedId as number, guid: item.guid, title: item.title, link: item.link, content: item.content, snippet: item.snippet, pubDate: item.pubDate, read: false, starred: false, author: item.author }));
         await db.articles.bulkAdd(articles);
       }
@@ -392,16 +432,24 @@
       
       {#if addMode === 'feed'}
         <div class="space-y-4">
-          <div><label for="feed-url" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed URL</label>
-            <input id="feed-url" type="url" bind:value={feedUrl} placeholder="https://example.com/feed.xml" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" /></div>
-          <div><label for="folder-select" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Folder (optional)</label>
-            <input id="folder-search" type="text" bind:value={folderSearchQuery} placeholder="Search..." class="w-full px-3 py-2 mb-2 border rounded bg-white dark:bg-gray-700" />
-            <div class="max-h-40 overflow-y-auto border rounded bg-white dark:bg-gray-700 p-2">
-              <label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={null} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">No folder</span></label>
-              {#each filteredFolders as folder}<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={folder.id} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">{folder.name}</span></label>{/each}
-            </div></div>
-          {#if feedError}<p class="text-red-500 text-sm">{feedError}</p>{/if}
-          <button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded disabled:opacity-50" on:click={addFeed} disabled={feedLoading}>{feedLoading ? 'Saving...' : (editingId ? 'Update Feed' : 'Add Feed')}</button>
+			<div>
+				<label for="feed-url" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed URL</label>
+				<input id="feed-url" type="url" bind:value={feedUrl} placeholder="https://example.com/feed.xml" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" />
+			</div>
+
+			<div>
+				<label for="feed-title" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed Title</label>
+				<input id="feed-title" type="url" bind:value={feedTitle} placeholder="Feed title" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" />
+			</div>
+		
+			<div><label for="folder-select" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Folder (optional)</label>
+			<input id="folder-search" type="text" bind:value={folderSearchQuery} placeholder="Search..." class="w-full px-3 py-2 mb-2 border rounded bg-white dark:bg-gray-700" />
+			<div class="max-h-40 overflow-y-auto border rounded bg-white dark:bg-gray-700 p-2">
+				<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={null} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">No folder</span></label>
+				{#each filteredFolders as folder}<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={folder.id} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">{folder.name}</span></label>{/each}
+			</div></div>
+			{#if feedError}<p class="text-red-500 text-sm">{feedError}</p>{/if}
+			<button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded disabled:opacity-50" on:click={addFeed} disabled={feedLoading}>{feedLoading ? 'Saving...' : (editingId ? 'Update Feed' : 'Add Feed')}</button>
         </div>
       {:else if addMode === 'folder'}
         <div class="space-y-4">
