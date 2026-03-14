@@ -1,3 +1,27 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
+
+  let refreshInterval = 15;
+
+  onMount(() => {
+    if (browser) {
+      const stored = localStorage.getItem('refreshInterval');
+      if (stored) {
+        refreshInterval = parseInt(stored, 10);
+      }
+    }
+  });
+
+  function updateRefreshInterval(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    refreshInterval = parseInt(target.value, 10);
+    if (browser) {
+      localStorage.setItem('refreshInterval', String(refreshInterval));
+    }
+  }
+</script>
+
 <div class="p-8 bg-gray-100 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100">
   <div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 p-6 rounded shadow">
     <div class="flex items-center mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
@@ -6,6 +30,29 @@
       </a>
       <h1 class="text-2xl font-bold">Settings</h1>
     </div>
+    
+    <div class="mb-6">
+      <h2 class="font-semibold mb-2">Feed Refresh</h2>
+      <div class="flex items-center space-x-2">
+        <label for="refresh-interval" class="text-sm text-gray-600 dark:text-gray-400">
+          Refresh feeds every
+        </label>
+        <select 
+          id="refresh-interval"
+          value={refreshInterval}
+          on:change={updateRefreshInterval}
+          class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          {#each Array(60) as _, i}
+            <option value={i + 1}>{i + 1} minute{i === 0 ? '' : 's'}</option>
+          {/each}
+        </select>
+      </div>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        Current interval: {refreshInterval} minute{refreshInterval === 1 ? '' : 's'}
+      </p>
+    </div>
+    
     <div class="mb-4">
       <h2 class="font-semibold mb-2">Data Management</h2>
       <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mr-2">Import OPML</button>

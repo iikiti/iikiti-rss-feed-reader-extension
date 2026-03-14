@@ -27,19 +27,32 @@ export interface Article {
 export interface Folder {
   id?: number;
   name: string;
+  parentId?: number; // For subfolders
+}
+
+export interface View {
+  id?: number;
+  name: string;
+  filterJson: string; // JSON string of filter criteria
 }
 
 export class IikitiDB extends Dexie {
   feeds!: Table<Feed>;
   articles!: Table<Article>;
   folders!: Table<Folder>;
+  views!: Table<View>;
 
   constructor() {
     super('iikiti');
     this.version(1).stores({
       feeds: '++id, &url, folderId',
       articles: '++id, feedId, &guid, pubDate, [read+feedId], starred',
-      folders: '++id, &name'
+      folders: '++id, &name, parentId'
+    });
+    this.version(2).stores({
+      views: '++id, &name'
+    }).upgrade(tx => {
+      return tx.table('views').add({ name: 'All Articles', filterJson: '{}' });
     });
   }
 }
