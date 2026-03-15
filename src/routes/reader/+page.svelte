@@ -63,7 +63,7 @@ let folderCounts = $state<Record<number, { total: number; unread: number }>>({})
 
 // Drag and drop state
 let draggedItem: { type: 'folder' | 'feed'; id: number } | null = $state(null);
-let dragOverItem: { type: 'folder' | 'feed'; id: number } | null = $state(null);
+let dragOverItem: { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null = $state(null);
 
 
 const filteredFolders = $derived(
@@ -154,7 +154,24 @@ const availableParentFolders = $derived(
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'move';
     }
-    dragOverItem = { type, id };
+    
+    // Calculate position relative to the target element
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const relativeY = event.clientY - rect.top;
+    const height = rect.height;
+    
+    // Determine if drag is above, below, or on the item
+    let position: 'above' | 'below' | 'on' = 'on';
+    if (relativeY < height * 0.25) {
+      position = 'above';
+    } else if (relativeY > height * 0.75) {
+      position = 'below';
+    } else {
+      position = 'on';
+    }
+    
+    dragOverItem = { type, id, position };
   }
 
   function handleDragLeave() {
@@ -163,6 +180,8 @@ const availableParentFolders = $derived(
 
   async function handleDrop(event: DragEvent, targetType: 'folder' | 'feed', targetId: number) {
     event.preventDefault();
+    
+    const position = dragOverItem?.position ?? 'on';
     dragOverItem = null;
     
     if (!draggedItem || draggedItem.id === targetId) {
@@ -185,6 +204,7 @@ const availableParentFolders = $derived(
       const targetFolder = folders.find(f => f.id === targetId);
       parentId = targetFolder?.parentId;
       items = folders.filter(f => f.parentId === parentId) as (Folder | Feed)[];
+	  console.log(targetFolder, items);
     } else {
       // Target is a feed
       const targetFeed = feeds.find(f => f.id === targetId);
@@ -205,9 +225,25 @@ const availableParentFolders = $derived(
       return;
     }
 
+    // Calculate the new index based on position
+    let newIndex = targetIndex;
+    if (position === 'above') {
+      newIndex = targetIndex;
+    } else if (position === 'below') {
+      newIndex = targetIndex + 1;
+    } else {
+      // 'on' - swap positions
+      newIndex = targetIndex;
+    }
+    
+    // Adjust for the case where dragged item was before the target
+    if (draggedIndex < targetIndex && position !== 'above') {
+      newIndex--;
+    }
+
     // Reorder items
     const [removed] = items.splice(draggedIndex, 1);
-    items.splice(targetIndex, 0, removed);
+    items.splice(newIndex, 0, removed);
 
     // Update order in database
     for (let i = 0; i < items.length; i++) {
@@ -663,6 +699,12 @@ const totalCount = $derived(
             ondragleave={handleDragLeave}
             ondrop={(e) => handleDrop(e, 'folder', folder.id!)}
             ondragend={handleDragEnd}
+            class:rounded-t={dragOverItem?.id === folder.id && dragOverItem?.position === 'above'}
+            class:rounded-b={dragOverItem?.id === folder.id && dragOverItem?.position === 'below'}
+            class:border-t-2={dragOverItem?.id === folder.id && dragOverItem?.position === 'above'}
+            class:border-b-2={dragOverItem?.id === folder.id && dragOverItem?.position === 'below'}
+            class:border-blue-500={dragOverItem?.id === folder.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
+            class:bg-blue-50={dragOverItem?.id === folder.id && dragOverItem?.position === 'on'}
           >
             <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === folder.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(folder.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(folder.id!)}>
               <span class="flex justify-between items-center">
@@ -697,6 +739,12 @@ const totalCount = $derived(
                   ondragleave={handleDragLeave}
                   ondrop={(e) => handleDrop(e, 'folder', child.id!)}
                   ondragend={handleDragEnd}
+                  class:rounded-t={dragOverItem?.id === child.id && dragOverItem?.position === 'above'}
+                  class:rounded-b={dragOverItem?.id === child.id && dragOverItem?.position === 'below'}
+                  class:border-t-2={dragOverItem?.id === child.id && dragOverItem?.position === 'above'}
+                  class:border-b-2={dragOverItem?.id === child.id && dragOverItem?.position === 'below'}
+                  class:border-blue-500={dragOverItem?.id === child.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
+                  class:bg-blue-50={dragOverItem?.id === child.id && dragOverItem?.position === 'on'}
                 >
                 <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === child.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(child.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(child.id!)}>
                   <span class="flex justify-between items-center">
@@ -730,6 +778,12 @@ const totalCount = $derived(
                       ondragleave={handleDragLeave}
                       ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
                       ondragend={handleDragEnd}
+                      class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
+                      class:rounded-b={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
+                      class:border-t-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
+                      class:border-b-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
+                      class:border-blue-500={dragOverItem?.id === feed.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
+                      class:bg-blue-50={dragOverItem?.id === feed.id && dragOverItem?.position === 'on'}
                     >
                       <div class="w-full text-left px-10 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
                         <span class="flex justify-between items-center">
@@ -758,6 +812,12 @@ const totalCount = $derived(
                   ondragleave={handleDragLeave}
                   ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
                   ondragend={handleDragEnd}
+                  class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
+                  class:rounded-b={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
+                  class:border-t-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
+                  class:border-b-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
+                  class:border-blue-500={dragOverItem?.id === feed.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
+                  class:bg-blue-50={dragOverItem?.id === feed.id && dragOverItem?.position === 'on'}
                 >
                   <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
                     <span class="flex justify-between items-center">
@@ -786,6 +846,12 @@ const totalCount = $derived(
             ondragleave={handleDragLeave}
             ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
             ondragend={handleDragEnd}
+            class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
+            class:rounded-b={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
+            class:border-t-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
+            class:border-b-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
+            class:border-blue-500={dragOverItem?.id === feed.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
+            class:bg-blue-50={dragOverItem?.id === feed.id && dragOverItem?.position === 'on'}
           >
             <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
               <span class="flex justify-between items-center">
