@@ -15,6 +15,7 @@ export interface Feed {
   url: string;
   title: string;
   folderId?: number;
+  order?: number;
   lastFetched?: number;
   error?: string;
   favicon?: string;
@@ -49,6 +50,7 @@ export interface Folder {
   userId: number;
   name: string;
   parentId?: number; // For subfolders
+  order?: number;
 }
 
 export interface View {
@@ -74,11 +76,12 @@ export class IikitiDB extends Dexie {
     // Version 5: Fixed unique constraint on folder name (now unique per user)
     // Version 6: Added siteContent field to articles
     // Version 7: Added full-text search index fields
-    this.version(7).stores({
+    // Version 8: Added order field to folders and feeds
+    this.version(8).stores({
       users: '++id, &name',
-      feeds: '++id, userId, &url, folderId',
+      feeds: '++id, userId, &url, folderId, [userId+order]',
       articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title',
-      folders: '++id, userId, [userId+name], parentId',
+      folders: '++id, userId, [userId+name], parentId, [userId+order]',
       views: '++id, userId, &name'
     }).upgrade(tx => {
       return Promise.resolve();
@@ -178,6 +181,50 @@ export async function getFeedArticleCounts(userId: number, feedId: number): Prom
   const total = await db.articles.where('userId').equals(userId).and(a => a.feedId === feedId).count();
   const unread = await db.articles.where('userId').equals(userId).and(a => a.feedId === feedId && !a.read).count();
   return { total, unread };
+}
+
+// Get article counts for a specific folder (including all feeds in subfolders)
+export async function getFolderArticleCounts(userId: number, folderId: number): Promise<{ total: number; unread: number }> {
+  // Get feeds directly in this folder
+  const feedsInFolder = await db.feeds.where('userId').equals(userId).and(f => f.folderId === folderId).toArray();
+  const feedIds = feedsInFolder.map(f => f.id!);
+  
+  // Get all child folder IDs recursively
+  const getChildFolderIds = async (parentId: number): Promise<number[]> => {
+    const childFolders = await db.folders.where('parentId').equals(parentId).toArray();
+    const childIds = childFolders.map(f => f.id!);
+    const nestedIds: number[] = [];
+    for (const id of childIds) {
+      nestedIds.push(...await getChildFolderIds(id));
+    }
+    return [...childIds, ...nestedIds];
+  };
+  
+  const childFolderIds = await getChildFolderIds(folderId);
+  
+  // Get feeds from child folders
+  for (const childId of childFolderIds) {
+    const childFeeds = await db.feeds.where('userId').equals(userId).and(f => f.folderId === childId).toArray();
+    feedIds.push(...childFeeds.map(f => f.id!));
+  }
+  
+  if (feedIds.length === 0) {
+    return { total: 0, unread: 0 };
+  }
+  
+  const total = await db.articles.where('userId').equals(userId).and(a => feedIds.includes(a.feedId)).count();
+  const unread = await db.articles.where('userId').equals(userId).and(a => feedIds.includes(a.feedId) && !a.read).count();
+  return { total, unread };
+}
+
+// Update feed order
+export async function updateFeedOrder(feedId: number, order: number): Promise<void> {
+  await db.feeds.update(feedId, { order });
+}
+
+// Update folder order
+export async function updateFolderOrder(folderId: number, order: number): Promise<void> {
+  await db.folders.update(folderId, { order });
 }
 
 // Sort options for articles

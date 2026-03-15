@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, type SortOption } from '$lib/db';
+import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, getFeedArticleCounts, getFolderArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 import { SvelteSet } from 'svelte/reactivity';
 
@@ -54,6 +54,17 @@ let folderSearchQuery = $state('');
 // Total article counts (unpaginated)
 let totalArticleCounts = $state({ total: 0, unread: 0 });
 
+// Folder expand/collapse state
+let expandedFolders = new SvelteSet<number>([]);
+
+// Feed and folder counts cache
+let feedCounts = $state<Record<number, { total: number; unread: number }>>({});
+let folderCounts = $state<Record<number, { total: number; unread: number }>>({});
+
+// Drag and drop state
+let draggedItem: { type: 'folder' | 'feed'; id: number } | null = $state(null);
+let dragOverItem: { type: 'folder' | 'feed'; id: number } | null = $state(null);
+
 
 const filteredFolders = $derived(
 	folders.filter(f => 
@@ -77,6 +88,148 @@ const availableParentFolders = $derived(
       allFeedIds = allFeedIds.concat(getFeedIdsInFolder(child.id!));
     }
     return allFeedIds;
+  }
+
+  function toggleFolderExpand(folderId: number) {
+    if (expandedFolders.has(folderId)) {
+      expandedFolders.delete(folderId);
+    } else {
+      expandedFolders.add(folderId);
+    }
+  }
+
+  function isFolderExpanded(folderId: number): boolean {
+    return expandedFolders.has(folderId);
+  }
+
+  async function loadFeedAndFolderCounts() {
+    if (!currentUserId) return;
+    
+    // Load feed counts
+    const newFeedCounts: Record<number, { total: number; unread: number }> = {};
+    for (const feed of feeds) {
+      if (feed.id) {
+        newFeedCounts[feed.id] = await getFeedArticleCounts(currentUserId, feed.id);
+      }
+    }
+    feedCounts = newFeedCounts;
+    
+    // Load folder counts
+    const newFolderCounts: Record<number, { total: number; unread: number }> = {};
+    for (const folder of folders) {
+      if (folder.id) {
+        newFolderCounts[folder.id] = await getFolderArticleCounts(currentUserId, folder.id);
+      }
+    }
+    folderCounts = newFolderCounts;
+  }
+
+  // Sorted folders and feeds by order
+  const sortedRootFolders = $derived(
+    [...folders.filter(f => !f.parentId)].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  );
+
+  const sortedUnfolderedFeeds = $derived(
+    [...feeds.filter(f => !f.folderId)].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  );
+
+  function getSortedChildFolders(parentId: number) {
+    return [...folders.filter(f => f.parentId === parentId)].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  function getSortedFeedsInFolder(folderId: number) {
+    return [...feeds.filter(f => f.folderId === folderId)].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  // Drag and drop handlers
+  function handleDragStart(event: DragEvent, type: 'folder' | 'feed', id: number) {
+    draggedItem = { type, id };
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+    }
+  }
+
+  function handleDragOver(event: DragEvent, type: 'folder' | 'feed', id: number) {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    dragOverItem = { type, id };
+  }
+
+  function handleDragLeave() {
+    dragOverItem = null;
+  }
+
+  async function handleDrop(event: DragEvent, targetType: 'folder' | 'feed', targetId: number) {
+    event.preventDefault();
+    dragOverItem = null;
+    
+    if (!draggedItem || draggedItem.id === targetId) {
+      draggedItem = null;
+      return;
+    }
+
+    // Can't drag feed onto itself
+    if (draggedItem.type === targetType && draggedItem.id === targetId) {
+      draggedItem = null;
+      return;
+    }
+
+    // Get the items being reordered
+    let items: (Folder | Feed)[] = [];
+    let parentId: number | undefined = undefined;
+
+    if (targetType === 'folder') {
+      // Get folders at the same level
+      const targetFolder = folders.find(f => f.id === targetId);
+      parentId = targetFolder?.parentId;
+      items = folders.filter(f => f.parentId === parentId) as (Folder | Feed)[];
+    } else {
+      // Target is a feed
+      const targetFeed = feeds.find(f => f.id === targetId);
+      parentId = targetFeed?.folderId;
+      if (parentId === undefined) {
+        items = feeds.filter(f => !f.folderId);
+      } else {
+        items = feeds.filter(f => f.folderId === parentId) as (Folder | Feed)[];
+      }
+    }
+
+    // Find current index and target index
+    const draggedIndex = items.findIndex(item => item.id === draggedItem!.id);
+    const targetIndex = items.findIndex(item => item.id === targetId);
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      draggedItem = null;
+      return;
+    }
+
+    // Reorder items
+    const [removed] = items.splice(draggedIndex, 1);
+    items.splice(targetIndex, 0, removed);
+
+    // Update order in database
+    for (let i = 0; i < items.length; i++) {
+      const itemId = items[i].id;
+      if (itemId !== undefined) {
+        if ('url' in items[i]) {
+          await updateFeedOrder(itemId, i);
+        } else {
+          await updateFolderOrder(itemId, i);
+        }
+      }
+    }
+
+    // Reload data
+    await loadData();
+    await loadFeedAndFolderCounts();
+    draggedItem = null;
+  }
+
+  function handleDragEnd() {
+    draggedItem = null;
+    dragOverItem = null;
   }
   
 const filteredArticles = $derived(
@@ -211,6 +364,9 @@ const totalCount = $derived(
     
     // Load total article counts (unpaginated)
     totalArticleCounts = await getUserArticleCounts(currentUserId);
+    
+    // Load feed and folder counts
+    await loadFeedAndFolderCounts();
     
     // Reset pagination and load first 25 articles
     articleOffset = 0;
@@ -496,69 +652,150 @@ const totalCount = $derived(
         <li class="group">
           <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={selectAllArticles} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount}/{totalCount})</span></div>
         </li>
-        {#each folders.filter(f => !f.parentId) as folder}
-          {@const childFolders = folders.filter(f => f.parentId === folder.id)}
-          {@const folderFeeds = feeds.filter(f => f.folderId === folder.id)}
-          <li class="group">
+        {#each sortedRootFolders as folder}
+          {@const childFolders = getSortedChildFolders(folder.id!)}
+          {@const folderFeeds = getSortedFeedsInFolder(folder.id!)}
+          {@const folderCount = folderCounts[folder.id!] || { total: 0, unread: 0 }}
+          <li class="group" 
+            draggable="true"
+            ondragstart={(e) => handleDragStart(e, 'folder', folder.id!)}
+            ondragover={(e) => handleDragOver(e, 'folder', folder.id!)}
+            ondragleave={handleDragLeave}
+            ondrop={(e) => handleDrop(e, 'folder', folder.id!)}
+            ondragend={handleDragEnd}
+          >
             <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === folder.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(folder.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(folder.id!)}>
               <span class="flex justify-between items-center">
-                <span>📁 {folder.name}</span>
-                <span class="hidden group-hover:inline-flex gap-1">
-                  <button onclick={() => openAddModal('folder', folder)} class="text-blue-500 p-1" aria-label="Edit folder">✏️</button>
-                  <button onclick={() => deleteFolder(folder.id!)} class="text-red-500 p-1" aria-label="Delete folder">🗑️</button>
+                <span class="flex items-center gap-1">
+                  <button 
+                    onclick={(e) => { e.stopPropagation(); toggleFolderExpand(folder.id!); }} 
+                    class="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                    aria-label={isFolderExpanded(folder.id!) ? 'Collapse folder' : 'Expand folder'}
+                  >
+                    {isFolderExpanded(folder.id!) ? '▼' : '▶'}
+                  </button>
+                  <span>📁 {folder.name}</span>
+                </span>
+                <span class="flex items-center gap-2">
+                  <span class="text-xs text-gray-500">{folderCount.unread}/{folderCount.total}</span>
+                  <span class="hidden group-hover:inline-flex gap-1">
+                    <button onclick={(e) => { e.stopPropagation(); openAddModal('folder', folder); }} class="text-blue-500 p-1" aria-label="Edit folder">✏️</button>
+                    <button onclick={(e) => { e.stopPropagation(); deleteFolder(folder.id!); }} class="text-red-500 p-1" aria-label="Delete folder">🗑️</button>
+                  </span>
                 </span>
               </span>
             </div>
-          </li>
-          {#each childFolders as child}
-            {@const childFeeds = feeds.filter(f => f.folderId === child.id)}
-            <li class="group">
-            <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === child.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(child.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(child.id!)}>
-              <span class="flex justify-between items-center">
-                <span>📁 {child.name}</span>
-                <span class="hidden group-hover:inline-flex gap-1">
-                  <button onclick={() => openAddModal('folder', child)} class="text-blue-500 p-1" aria-label="Edit child folder">✏️</button>
-                  <button onclick={() => deleteFolder(child.id!)} class="text-red-500 p-1" aria-label="Delete child folder">🗑️</button>
-                </span>
-              </span>
-            </div>
-          </li>
-            {#each childFeeds as feed}
-            <li class="group">
-              <div class="w-full text-left px-10 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
-                <span class="flex justify-between items-center">
-                  <span>{feed.title}</span>
-                  <span class="hidden group-hover:inline-flex gap-1">
-                    <button onclick={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-                    <button onclick={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+            {#if isFolderExpanded(folder.id!)}
+              <ul>
+                {#each childFolders as child}
+                {@const childFeeds = getSortedFeedsInFolder(child.id!)}
+                {@const childCount = folderCounts[child.id!] || { total: 0, unread: 0 }}
+                <li class="group"
+                  draggable="true"
+                  ondragstart={(e) => handleDragStart(e, 'folder', child.id!)}
+                  ondragover={(e) => handleDragOver(e, 'folder', child.id!)}
+                  ondragleave={handleDragLeave}
+                  ondrop={(e) => handleDrop(e, 'folder', child.id!)}
+                  ondragend={handleDragEnd}
+                >
+                <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === child.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(child.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(child.id!)}>
+                  <span class="flex justify-between items-center">
+                    <span class="flex items-center gap-1">
+                      <button 
+                        onclick={(e) => { e.stopPropagation(); toggleFolderExpand(child.id!); }} 
+                        class="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                        aria-label={isFolderExpanded(child.id!) ? 'Collapse folder' : 'Expand folder'}
+                      >
+                        {isFolderExpanded(child.id!) ? '▼' : '▶'}
+                      </button>
+                      <span>📁 {child.name}</span>
+                    </span>
+                    <span class="flex items-center gap-2">
+                      <span class="text-xs text-gray-500">{childCount.unread}/{childCount.total}</span>
+                      <span class="hidden group-hover:inline-flex gap-1">
+                        <button onclick={(e) => { e.stopPropagation(); openAddModal('folder', child); }} class="text-blue-500 p-1" aria-label="Edit child folder">✏️</button>
+                        <button onclick={(e) => { e.stopPropagation(); deleteFolder(child.id!); }} class="text-red-500 p-1" aria-label="Delete child folder">🗑️</button>
+                      </span>
+                    </span>
                   </span>
-                </span>
-              </div>
+                </div>
+                {#if isFolderExpanded(child.id!)}
+                <ul>
+                  {#each childFeeds as feed}
+                    {@const feedCount = feedCounts[feed.id!] || { total: 0, unread: 0 }}
+                    <li class="group"
+                      draggable="true"
+                      ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
+                      ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
+                      ondragleave={handleDragLeave}
+                      ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
+                      ondragend={handleDragEnd}
+                    >
+                      <div class="w-full text-left px-10 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
+                        <span class="flex justify-between items-center">
+                          <span>📰 {feed.title}</span>
+                          <span class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500">{feedCount.unread}/{feedCount.total}</span>
+                            <span class="hidden group-hover:inline-flex gap-1">
+                              <button onclick={(e) => { e.stopPropagation(); openAddModal('feed', feed); }} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
+                              <button onclick={(e) => { e.stopPropagation(); deleteFeed(feed.id!); }} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                            </span>
+                          </span>
+                        </span>
+                      </div>
+                    </li>
+                  {/each}
+                  </ul>
+                {/if}
             </li>
-            {/each}
-          {/each}
-          {#each folderFeeds as feed}
-            <li class="group">
-              <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
-                <span class="flex justify-between items-center">
-                  <span>{feed.title}</span>
-                  <span class="hidden group-hover:inline-flex gap-1">
-                    <button onclick={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-                    <button onclick={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
-                  </span>
-                </span>
-              </div>
-            </li>
-          {/each}
+              {/each}
+              {#each folderFeeds as feed}
+                {@const feedCount = feedCounts[feed.id!] || { total: 0, unread: 0 }}
+                <li class="group"
+                  draggable="true"
+                  ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
+                  ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
+                  ondragleave={handleDragLeave}
+                  ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
+                  ondragend={handleDragEnd}
+                >
+                  <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
+                    <span class="flex justify-between items-center">
+                      <span>📰 {feed.title}</span>
+                      <span class="flex items-center gap-2">
+                        <span class="text-xs text-gray-500">{feedCount.unread}/{feedCount.total}</span>
+                        <span class="hidden group-hover:inline-flex gap-1">
+                          <button onclick={(e) => { e.stopPropagation(); openAddModal('feed', feed); }} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
+                          <button onclick={(e) => { e.stopPropagation(); deleteFeed(feed.id!); }} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                        </span>
+                      </span>
+                    </span>
+                  </div>
+                </li>
+              {/each}
+              </ul>
+            {/if}
+          </li>
         {/each}
-        {#each feeds.filter(f => !f.folderId) as feed}
-          <li class="group">
+        {#each sortedUnfolderedFeeds as feed}
+          {@const feedCount = feedCounts[feed.id!] || { total: 0, unread: 0 }}
+          <li class="group"
+            draggable="true"
+            ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
+            ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
+            ondragleave={handleDragLeave}
+            ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
+            ondragend={handleDragEnd}
+          >
             <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
               <span class="flex justify-between items-center">
-                <span>{feed.title}</span>
-                <span class="hidden group-hover:inline-flex gap-1">
-                  <button onclick={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-                  <button onclick={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                <span>📰 {feed.title}</span>
+                <span class="flex items-center gap-2">
+                  <span class="text-xs text-gray-500">{feedCount.unread}/{feedCount.total}</span>
+                  <span class="hidden group-hover:inline-flex gap-1">
+                    <button onclick={(e) => { e.stopPropagation(); openAddModal('feed', feed); }} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
+                    <button onclick={(e) => { e.stopPropagation(); deleteFeed(feed.id!); }} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                  </span>
                 </span>
               </span>
             </div>
