@@ -4,11 +4,11 @@
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && node scripts/extract-inline.js && bun run build:scripts",
+		"build": "vite build && node scripts/extract-inline.js && bun run build:scripts && bun run copy:static",
 		"preview": "vite preview",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
-		"build:worker": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm",
+		"copy:static": "cp -r src/static build/",
 		"build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm && cp src/manifest.json build/manifest.json"
 	},
 	"devDependencies": {

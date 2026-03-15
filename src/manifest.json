@@ -23,6 +23,12 @@
 		"scripts": ["background.js"],
 		"type": "module"
 	},
+	"icons": {
+		"16": "static/img/iikiti.webp",
+		"32": "static/img/iikiti.webp",
+		"48": "static/img/iikiti.webp",
+		"128": "static/img/iikiti.webp"
+	},
 	"action": {
 		"default_popup": "popup/index.html",
 		"default_title": "iikiti Feed Reader"
@@ -40,7 +46,7 @@
 	],
 	"web_accessible_resources": [
 		{
-		  "resources": ["popup/index.html", "reader/index.html", "background.js", "content.js"],
+		  "resources": ["popup/index.html", "reader/index.html", "background.js", "content.js", "static/**/*"],
 		  "matches": ["<all_urls>"]
 		}
 	]
