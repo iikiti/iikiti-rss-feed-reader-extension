@@ -179,13 +179,21 @@ async function extractImageAndSiteContent(articleUrl: string): Promise<Extracted
       
       // Get text content, preserving paragraph structure
       let textContent = '';
-      const paragraphs = contentClone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+      const paragraphs = contentClone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, li, blockquote');
       
       if (paragraphs.length > 0) {
-        paragraphs.forEach(p => {
-          const text = p.textContent?.trim();
+        paragraphs.forEach(elem => {
+          // For list elements (ul, ol, li), preserve inner HTML to keep list structure
+          const isListElement = elem.nodeName === 'UL' || elem.nodeName === 'OL' || elem.nodeName === 'LI';
+          let text: string;
+          if (isListElement) {
+            // Get innerHTML to preserve list item structure
+            text = elem.innerHTML;
+          } else {
+            text = elem.textContent?.trim() || '';
+          }
           if (text && text.length > 20) {
-            textContent += '<p>' + text + '</p>';
+            textContent += `<${elem.nodeName.toLowerCase()}>` + text + `</${elem.nodeName.toLowerCase()}>`;
           }
         });
       } else {
