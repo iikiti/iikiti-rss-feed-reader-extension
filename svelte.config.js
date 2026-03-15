@@ -6,16 +6,16 @@ const config = {
 	preprocess: vitePreprocess(),
 
 	kit: {
-			adapter: adapter({
-				fallback: 'app.html' // SPA fallback
-			}),
-        appDir: 'internal', // Make it cleaner for extension
-				csp: {
-					directives: {
-						'script-src': ['self']
-					}
-				}
-			}
+	adapter: adapter({
+	fallback: 'app.html' // SPA fallback
+	}),
+		    appDir: 'internal', // Make it cleaner for extension
+	csp: {
+	directives: {
+	'script-src': ['self']
+	}
+	}
+	}
 };
 
 export default config;

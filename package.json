@@ -1,36 +1,36 @@
 {
-  "name": "iikiti",
-  "version": "0.0.1",
-  "private": true,
-  "scripts": {
-    "dev": "vite dev",
-    "build": "vite build && node scripts/extract-inline.js && bun run build:scripts",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
-    "build:worker": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm",
-    "build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm && cp src/manifest.json build/manifest.json"
-  },
-  "devDependencies": {
-    "@sveltejs/adapter-auto": "^3.3.1",
-    "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.55.0",
-    "@sveltejs/vite-plugin-svelte": "^6.2.4",
-    "@types/chrome": "^0.1.37",
-    "autoprefixer": "^10.4.27",
-    "esbuild": "^0.27.4",
-    "postcss": "^8.5.8",
-    "svelte": "^5.53.12",
-    "svelte-check": "^4.4.5",
-    "tailwindcss": "^3.4.19",
-    "tiny-glob": "^0.2.9",
-    "tslib": "^2.8.1",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.1"
-  },
-  "dependencies": {
-    "@js-temporal/polyfill": "^0.5.1",
-    "dexie": "^3.2.7"
-  },
-  "type": "module"
+	"name": "iikiti",
+	"version": "0.0.1",
+	"private": true,
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build && node scripts/extract-inline.js && bun run build:scripts",
+		"preview": "vite preview",
+		"check": "svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
+		"build:worker": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm",
+		"build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm && cp src/manifest.json build/manifest.json"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-auto": "^3.3.1",
+		"@sveltejs/adapter-static": "^3.0.10",
+		"@sveltejs/kit": "^2.55.0",
+		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@types/chrome": "^0.1.37",
+		"autoprefixer": "^10.4.27",
+		"esbuild": "^0.27.4",
+		"postcss": "^8.5.8",
+		"svelte": "^5.53.12",
+		"svelte-check": "^4.4.5",
+		"tailwindcss": "^3.4.19",
+		"tiny-glob": "^0.2.9",
+		"tslib": "^2.8.1",
+		"typescript": "^5.9.3",
+		"vite": "^7.3.1"
+	},
+	"dependencies": {
+		"@js-temporal/polyfill": "^0.5.1",
+		"dexie": "^3.2.7"
+	},
+	"type": "module"
 }
