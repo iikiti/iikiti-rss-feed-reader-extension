@@ -1,4 +1,4 @@
-<script lang="ts">
+e<script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, deleteUser, renameUser, type User } from '$lib/db';
