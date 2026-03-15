@@ -32,6 +32,13 @@ export interface Article {
   starred: boolean;
   author?: string;
   image?: string;
+  // Full-text search index fields
+  titleWords?: string[];
+  snippetWords?: string[];
+  siteContentWords?: string[];
+  titleNgrams?: string[];
+  snippetNgrams?: string[];
+  siteContentNgrams?: string[];
 }
 
 export interface Folder {
@@ -63,7 +70,8 @@ export class IikitiDB extends Dexie {
     // Version 4: Added indexes for pubDate and title on articles for sorting
     // Version 5: Fixed unique constraint on folder name (now unique per user)
     // Version 6: Added siteContent field to articles
-    this.version(6).stores({
+    // Version 7: Added full-text search index fields
+    this.version(7).stores({
       users: '++id, &name',
       feeds: '++id, userId, &url, folderId',
       articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title',
