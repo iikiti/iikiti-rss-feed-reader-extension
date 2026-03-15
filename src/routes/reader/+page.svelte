@@ -162,10 +162,11 @@ const availableParentFolders = $derived(
     const height = rect.height;
     
     // Determine if drag is above, below, or on the item
+    // Use more generous zones (30% from top/bottom)
     let position: 'above' | 'below' | 'on' = 'on';
-    if (relativeY < height * 0.25) {
+    if (relativeY < height * 0.3) {
       position = 'above';
-    } else if (relativeY > height * 0.75) {
+    } else if (relativeY > height * 0.7) {
       position = 'below';
     } else {
       position = 'on';
@@ -174,8 +175,13 @@ const availableParentFolders = $derived(
     dragOverItem = { type, id, position };
   }
 
-  function handleDragLeave() {
-    dragOverItem = null;
+  function handleDragLeave(event: DragEvent) {
+    // Only clear if we're leaving the container, not moving to a child element
+    const relatedTarget = event.relatedTarget as Node | null;
+    const currentTarget = event.currentTarget as Node;
+    if (!relatedTarget || !currentTarget.contains(relatedTarget)) {
+      dragOverItem = null;
+    }
   }
 
   async function handleDrop(event: DragEvent, targetType: 'folder' | 'feed', targetId: number) {
@@ -204,7 +210,6 @@ const availableParentFolders = $derived(
       const targetFolder = folders.find(f => f.id === targetId);
       parentId = targetFolder?.parentId;
       items = folders.filter(f => f.parentId === parentId) as (Folder | Feed)[];
-	  console.log(targetFolder, items);
     } else {
       // Target is a feed
       const targetFeed = feeds.find(f => f.id === targetId);
@@ -226,19 +231,23 @@ const availableParentFolders = $derived(
     }
 
     // Calculate the new index based on position
-    let newIndex = targetIndex;
+    // When dropping 'above' target, insert at targetIndex
+    // When dropping 'below' target, insert at targetIndex + 1
+    // When dropping 'on' target, swap positions
+    let newIndex: number;
     if (position === 'above') {
       newIndex = targetIndex;
     } else if (position === 'below') {
       newIndex = targetIndex + 1;
     } else {
-      // 'on' - swap positions
+      // 'on' - swap with target
       newIndex = targetIndex;
     }
     
-    // Adjust for the case where dragged item was before the target
+    // If dragging from a lower index to a higher index (except 'above'), need to adjust
+    // because removing the item shifts all indices
     if (draggedIndex < targetIndex && position !== 'above') {
-      newIndex--;
+      newIndex -= 1;
     }
 
     // Reorder items
@@ -696,7 +705,7 @@ const totalCount = $derived(
             draggable="true"
             ondragstart={(e) => handleDragStart(e, 'folder', folder.id!)}
             ondragover={(e) => handleDragOver(e, 'folder', folder.id!)}
-            ondragleave={handleDragLeave}
+            ondragleave={(e) => handleDragLeave(e)}
             ondrop={(e) => handleDrop(e, 'folder', folder.id!)}
             ondragend={handleDragEnd}
             class:rounded-t={dragOverItem?.id === folder.id && dragOverItem?.position === 'above'}
@@ -736,7 +745,7 @@ const totalCount = $derived(
                   draggable="true"
                   ondragstart={(e) => handleDragStart(e, 'folder', child.id!)}
                   ondragover={(e) => handleDragOver(e, 'folder', child.id!)}
-                  ondragleave={handleDragLeave}
+                  ondragleave={(e) => handleDragLeave(e)}
                   ondrop={(e) => handleDrop(e, 'folder', child.id!)}
                   ondragend={handleDragEnd}
                   class:rounded-t={dragOverItem?.id === child.id && dragOverItem?.position === 'above'}
@@ -775,7 +784,7 @@ const totalCount = $derived(
                       draggable="true"
                       ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
                       ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
-                      ondragleave={handleDragLeave}
+                      ondragleave={(e) => handleDragLeave(e)}
                       ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
                       ondragend={handleDragEnd}
                       class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
@@ -809,7 +818,7 @@ const totalCount = $derived(
                   draggable="true"
                   ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
                   ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
-                  ondragleave={handleDragLeave}
+                  ondragleave={(e) => handleDragLeave(e)}
                   ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
                   ondragend={handleDragEnd}
                   class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
@@ -843,7 +852,7 @@ const totalCount = $derived(
             draggable="true"
             ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
             ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
-            ondragleave={handleDragLeave}
+            ondragleave={(e) => handleDragLeave(e)}
             ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
             ondragend={handleDragEnd}
             class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
