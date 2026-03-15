@@ -88,7 +88,9 @@ const filteredArticles = $derived(
     }
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      return article.title.toLowerCase().includes(query) || article.snippet.toLowerCase().includes(query);
+      return article.title.toLowerCase().includes(query) ||
+	  	article.snippet.toLowerCase().includes(query) ||
+		article.siteContent?.toLowerCase().includes(query);
     }
     return true;
   })
