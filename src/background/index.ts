@@ -9,7 +9,8 @@ async function createRefreshAlarm() {
   // Get refresh interval from storage, default to 15 minutes
   const result = await chrome.storage.local.get('refreshInterval') as { refreshInterval?: number };
   const interval: number = result.refreshInterval || DEFAULT_REFRESH_INTERVAL;
-  
+
+  console.info(`Feed refresh interval is ${interval} minutes.`);
   chrome.alarms.create("refresh" as string, { periodInMinutes: interval } as chrome.alarms.AlarmCreateInfo);
 }
 

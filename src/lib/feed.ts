@@ -66,7 +66,7 @@ export async function fetchAndParseFeed(url: string): Promise<ParsedFeed> {
 	const itemsWithData = await Promise.all(
 		feed.items.map(async (item) => {
 			// Only fetch if we need image or site content
-			if (!item.image && item.link) {
+			if (item.link) {
 				const extracted = await extractImageAndSiteContent(item.link);
 				if (extracted.image || extracted.siteContent) {
 					console.log(`Data successfully acquired for ${item.link}`);
