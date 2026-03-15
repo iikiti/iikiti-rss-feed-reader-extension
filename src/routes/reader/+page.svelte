@@ -3,58 +3,62 @@ import { onMount } from 'svelte';
 import { browser } from '$app/environment';
 import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
+import { SvelteSet } from 'svelte/reactivity';
 
-let currentUserId: number | null = null;
-let users: { id?: number; name: string; createdAt: number }[] = [];
-let feeds: Feed[] = [];
-let folders: Folder[] = [];
-let views: View[] = [];
-let articles: Article[] = [];
-let showAddModal = false;
-let addMode: 'feed' | 'folder' | 'view' = 'feed';
-let editingId: number | null = null;
+let currentUserId: number | null = $state(null);
+let users: { id?: number; name: string; createdAt: number }[] = $state([]);
+let feeds: Feed[] = $state([]);
+let folders: Folder[] = $state([]);
+let views: View[] = $state([]);
+let articles: Article[] = $state([]);
+let showAddModal = $state(false);
+let addMode: 'feed' | 'folder' | 'view' = $state('feed');
+let editingId: number | null = $state(null);
 
 // Selection state
-let selectedViewId: number | null = null;
-let selectedFolderId: number | null = null;
-let selectedFeedId: number | null = null;
-let searchQuery = '';
-let expandedArticleId: number | null = null;
+let selectedViewId: number | null = $state(null);
+let selectedFolderId: number | null = $state(null);
+let selectedFeedId: number | null = $state(null);
+let searchQuery = $state('');
   
 // Feed form
-let feedUrl = '';
-let feedTitle = '';
-let feedFolderId: number | null = null;
-let feedError = '';
-let feedLoading = false;
+let feedUrl = $state('');
+let feedTitle = $state('');
+let feedFolderId: number | null = $state(null);
+let feedError = $state('');
+let feedLoading = $state(false);
 
 // Folder form
-let folderName = '';
-let folderParentId: number | null = null;
-let folderError = '';
+let folderName = $state('');
+let folderParentId: number | null = $state(null);
+let folderError = $state('');
 
 // View form
-let viewName = '';
-let viewFilterRead: 'all' | 'unread' | 'read' = 'all';
-let viewFilterStarred: 'all' | 'starred' = 'all';
-let viewError = '';
+let viewName = $state('');
+let viewFilterRead: 'all' | 'unread' | 'read' = $state('all');
+let viewFilterStarred: 'all' | 'starred' = $state('all');
+let viewError = $state('');
 
 // Sort option
-let sortBy: SortOption = 'pubDateDesc';
+let sortBy: SortOption = $state('pubDateDesc');
 
 // Folder search
-let folderSearchQuery = '';
+let folderSearchQuery = $state('');
 
 
-  $: filteredFolders = folders.filter(f => 
-    f.name.toLowerCase().includes(folderSearchQuery.toLowerCase()) && f.id !== editingId
-  );
+const filteredFolders = $derived(
+	folders.filter(f => 
+		f.name.toLowerCase().includes(folderSearchQuery.toLowerCase()) && f.id !== editingId
+	)
+);
 
-  $: availableParentFolders = folders.filter(f => {
-    if (f.id === editingId) return false;
-    if (f.parentId === editingId) return false;
-    return true;
-  });
+const availableParentFolders = $derived(
+	folders.filter(f => {
+		if (f.id === editingId) return false;
+		if (f.parentId === editingId) return false;
+		return true;
+	})
+);
 
   function getFeedIdsInFolder(folderId: number): number[] {
     const folderFeedIds = feeds.filter(f => f.folderId === folderId).map(f => f.id!);
@@ -66,7 +70,8 @@ let folderSearchQuery = '';
     return allFeedIds;
   }
   
-  $: filteredArticles = articles.filter(article => {
+const filteredArticles = $derived(
+  articles.filter(article => {
     if (selectedFeedId !== null && article.feedId !== selectedFeedId) return false;
     if (selectedFolderId !== null) {
       const feedIds = getFeedIdsInFolder(selectedFolderId);
@@ -86,19 +91,26 @@ let folderSearchQuery = '';
       return article.title.toLowerCase().includes(query) || article.snippet.toLowerCase().includes(query);
     }
     return true;
-  });
-  
-  $: currentTitle = selectedViewId 
+  })
+);
+
+const currentTitle = $derived(
+  selectedViewId 
     ? views.find(v => v.id === selectedViewId)?.name || 'View'
     : selectedFolderId 
       ? folders.find(f => f.id === selectedFolderId)?.name || 'Folder'
       : selectedFeedId 
         ? feeds.find(f => f.id === selectedFeedId)?.title || 'Feed'
-        : 'All Articles';
+        : 'All Articles'
+);
 
-  $: currentUserName = users.find(u => u.id === currentUserId)?.name || 'Loading...';
+const currentUserName = $derived(
+  users.find(u => u.id === currentUserId)?.name || 'Loading...'
+);
 
-  $: unreadCount = articles.filter(a => !a.read).length;
+const unreadCount = $derived(
+  articles.filter(a => !a.read).length
+);
 
   onMount(async () => {
     await loadUsers();
@@ -277,8 +289,22 @@ let folderSearchQuery = '';
   async function markAsRead(id: number) { await db.articles.update(id, { read: true }); await loadData(); }
   async function toggleStarred(id: number, current: boolean) { await db.articles.update(id, { starred: !current }); await loadData(); }
   
-  function toggleArticle(id: number) {
-    expandedArticleId = expandedArticleId === id ? null : id;
+  // Use article index in filtered list for expansion state (more reliable than database ID)
+  let expandedIndices = new SvelteSet<number>([]);
+
+  function toggleArticle(index: number) {
+    if (expandedIndices.has(index)) {
+    	expandedIndices.delete(index);
+    } else {
+		expandedIndices.forEach((idx) => {
+			expandedIndices.delete(idx);
+		});
+    	expandedIndices.add(index);
+    }
+  }
+
+  function isArticleExpanded(index: number): boolean {
+    return expandedIndices.has(index);
   }
   
   /**
@@ -286,18 +312,23 @@ let folderSearchQuery = '';
    * - For collapsed view: returns content (strip HTML for snippet) or snippet
    * - For expanded view: returns the longer of content or siteContent
    */
-  function getDisplayContent(article: Article): string {
-    const isExpanded = expandedArticleId === article.id;
+  function getDisplayContent(article: Article, index: number): string {
+    const isExpanded = isArticleExpanded(index);
     
     if (isExpanded) {
       // When expanded, use whichever is longer (content or siteContent)
-      const contentLen = (article.content || '').length;
-      const siteContentLen = (article.siteContent || '').length;
+      const content = article.content || '';
+      const siteContent = article.siteContent || '';
+      const contentLen = content.length;
+      const siteContentLen = siteContent.length;
       
+      // Use the longer content
       if (siteContentLen > contentLen) {
-        return article.siteContent || article.content || article.snippet;
+        return siteContent;
+      } else if (contentLen > 0) {
+        return content;
       } else {
-        return article.content || article.snippet;
+        return article.snippet;
       }
     } else {
       // When collapsed, use content for snippet (stripped of HTML)
@@ -315,7 +346,7 @@ let folderSearchQuery = '';
       <div class="flex justify-between items-center mb-2">
         <h1 class="text-xl font-bold">iikiti</h1>
         <div class="flex items-center space-x-1">
-          <button on:click={() => openAddModal('feed')} class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1" title="Add">+</button>
+          <button onclick={() => openAddModal('feed')} class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1" title="Add">+</button>
           <a href="/settings" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
         </div>
       </div>
@@ -325,7 +356,7 @@ let folderSearchQuery = '';
         <select 
           id="user-select"
           value={currentUserId} 
-          on:change={(e) => switchUser(parseInt(e.currentTarget.value))}
+          onchange={(e) => switchUser(parseInt(e.currentTarget.value))}
           class="w-full mt-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-sm"
         >
           {#each users as user}
@@ -336,21 +367,21 @@ let folderSearchQuery = '';
     </div>
     <div class="p-2 overflow-y-auto flex-1">
       <div class="mb-2 flex gap-1">
-        <button on:click={() => openAddModal('feed')} class="flex-1 text-xs bg-blue-600 text-white py-1 rounded">+ Feed</button>
-        <button on:click={() => openAddModal('folder')} class="flex-1 text-xs bg-gray-600 text-white py-1 rounded">+ Folder</button>
-        <button on:click={() => openAddModal('view')} class="flex-1 text-xs bg-green-600 text-white py-1 rounded">+ View</button>
+        <button onclick={() => openAddModal('feed')} class="flex-1 text-xs bg-blue-600 text-white py-1 rounded">+ Feed</button>
+        <button onclick={() => openAddModal('folder')} class="flex-1 text-xs bg-gray-600 text-white py-1 rounded">+ Folder</button>
+        <button onclick={() => openAddModal('view')} class="flex-1 text-xs bg-green-600 text-white py-1 rounded">+ View</button>
       </div>
       
       <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Views</div>
       <ul class="mb-3">
         {#each views as view}
           <li class="group">
-            <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedViewId === view.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={() => selectView(view.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectView(view.id!)}>
+            <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedViewId === view.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectView(view.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectView(view.id!)}>
               <span class="flex justify-between items-center">
                 <span>👁️ {view.name}</span>
                 <span class="hidden group-hover:inline-flex gap-1">
-                  <button on:click|stopPropagation={() => openAddModal('view', view)} class="text-blue-500 p-1" aria-label="Edit view">✏️</button>
-                  <button on:click|stopPropagation={() => deleteView(view.id!)} class="text-red-500 p-1" aria-label="Delete view">🗑️</button>
+                  <button onclick={() => openAddModal('view', view)} class="text-blue-500 p-1" aria-label="Edit view">✏️</button>
+                  <button onclick={() => deleteView(view.id!)} class="text-red-500 p-1" aria-label="Delete view">🗑️</button>
                 </span>
               </span>
             </div>
@@ -361,18 +392,18 @@ let folderSearchQuery = '';
       <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
       <ul>
         <li class="group">
-          <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={selectAllArticles} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount})</span></div>
+          <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={selectAllArticles} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount})</span></div>
         </li>
         {#each folders.filter(f => !f.parentId) as folder}
           {@const childFolders = folders.filter(f => f.parentId === folder.id)}
           {@const folderFeeds = feeds.filter(f => f.folderId === folder.id)}
           <li class="group">
-            <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === folder.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={() => selectFolder(folder.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectFolder(folder.id!)}>
+            <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === folder.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(folder.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(folder.id!)}>
               <span class="flex justify-between items-center">
                 <span>📁 {folder.name}</span>
                 <span class="hidden group-hover:inline-flex gap-1">
-                  <button on:click|stopPropagation={() => openAddModal('folder', folder)} class="text-blue-500 p-1" aria-label="Edit folder">✏️</button>
-                  <button on:click|stopPropagation={() => deleteFolder(folder.id!)} class="text-red-500 p-1" aria-label="Delete folder">🗑️</button>
+                  <button onclick={() => openAddModal('folder', folder)} class="text-blue-500 p-1" aria-label="Edit folder">✏️</button>
+                  <button onclick={() => deleteFolder(folder.id!)} class="text-red-500 p-1" aria-label="Delete folder">🗑️</button>
                 </span>
               </span>
             </div>
@@ -380,24 +411,24 @@ let folderSearchQuery = '';
           {#each childFolders as child}
             {@const childFeeds = feeds.filter(f => f.folderId === child.id)}
             <li class="group">
-            <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === child.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={() => selectFolder(child.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectFolder(child.id!)}>
+            <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === child.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(child.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(child.id!)}>
               <span class="flex justify-between items-center">
                 <span>📁 {child.name}</span>
                 <span class="hidden group-hover:inline-flex gap-1">
-                  <button on:click|stopPropagation={() => openAddModal('folder', child)} class="text-blue-500 p-1" aria-label="Edit child folder">✏️</button>
-                  <button on:click|stopPropagation={() => deleteFolder(child.id!)} class="text-red-500 p-1" aria-label="Delete child folder">🗑️</button>
+                  <button onclick={() => openAddModal('folder', child)} class="text-blue-500 p-1" aria-label="Edit child folder">✏️</button>
+                  <button onclick={() => deleteFolder(child.id!)} class="text-red-500 p-1" aria-label="Delete child folder">🗑️</button>
                 </span>
               </span>
             </div>
           </li>
             {#each childFeeds as feed}
             <li class="group">
-              <div class="w-full text-left px-10 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={() => selectFeed(feed.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
+              <div class="w-full text-left px-10 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
                 <span class="flex justify-between items-center">
                   <span>{feed.title}</span>
                   <span class="hidden group-hover:inline-flex gap-1">
-                    <button on:click|stopPropagation={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-                    <button on:click|stopPropagation={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                    <button onclick={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
+                    <button onclick={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
                   </span>
                 </span>
               </div>
@@ -406,12 +437,12 @@ let folderSearchQuery = '';
           {/each}
           {#each folderFeeds as feed}
             <li class="group">
-              <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={() => selectFeed(feed.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
+              <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
                 <span class="flex justify-between items-center">
                   <span>{feed.title}</span>
                   <span class="hidden group-hover:inline-flex gap-1">
-                    <button on:click|stopPropagation={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-                    <button on:click|stopPropagation={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                    <button onclick={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
+                    <button onclick={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
                   </span>
                 </span>
               </div>
@@ -420,12 +451,12 @@ let folderSearchQuery = '';
         {/each}
         {#each feeds.filter(f => !f.folderId) as feed}
           <li class="group">
-            <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" on:click={() => selectFeed(feed.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
+            <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
               <span class="flex justify-between items-center">
                 <span>{feed.title}</span>
                 <span class="hidden group-hover:inline-flex gap-1">
-                  <button on:click|stopPropagation={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-                  <button on:click|stopPropagation={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
+                  <button onclick={() => openAddModal('feed', feed)} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
+                  <button onclick={() => deleteFeed(feed.id!)} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
                 </span>
               </span>
             </div>
@@ -437,12 +468,12 @@ let folderSearchQuery = '';
 
   <main class="flex-1 flex flex-col">
     <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-      <h2 class="font-semibold text-lg">{currentTitle} <button on:click={() => refreshFeeds()}>Refresh</button></h2>
+      <h2 class="font-semibold text-lg">{currentTitle} <button onclick={() => refreshFeeds()}>Refresh</button></h2>
       <div class="flex items-center gap-2">
         <input type="search" placeholder="Search..." bind:value={searchQuery} class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700" />
         <select 
           value={sortBy} 
-          on:change={handleSortChange}
+          onchange={handleSortChange}
           class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700"
         >
           <option value="pubDateDesc">Newest First</option>
@@ -456,28 +487,28 @@ let folderSearchQuery = '';
       {#if filteredArticles.length === 0}
         <div class="bg-white dark:bg-gray-800 p-4 rounded shadow"><h3 class="font-bold text-lg mb-1">No articles</h3><p class="text-gray-600 dark:text-gray-400 text-sm">Add some feeds to see articles.</p></div>
       {:else}
-        {#each filteredArticles as article}
-          <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md transition-all duration-300 overflow-hidden" class:expanded={expandedArticleId === article.id}>
-            <div class="flex items-start gap-4" on:click={() => toggleArticle(article.id!)} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && toggleArticle(article.id!)}>
+        {#each filteredArticles as article, index}
+          <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md transition-all duration-300 overflow-hidden" class:expanded={isArticleExpanded(index)}>
+            <div class="flex items-start gap-4" onclick={() => toggleArticle(index)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && toggleArticle(index)}>
               {#if article.image}
                 <img src={article.image} alt="" class="w-32 h-32 object-cover rounded flex-shrink-0" />
               {/if}
               <div class="flex-1">
                 <h3 class="font-bold text-lg mb-1">
-                  <a href={article.link} target="_blank" rel="noopener noreferrer" class="hover:underline text-blue-600 dark:text-blue-400" on:click|stopPropagation>{article.title}</a>
+                  <a href={article.link} target="_blank" rel="noopener noreferrer" class="hover:underline text-blue-600 dark:text-blue-400">{article.title}</a>
                 </h3>
                 <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>
-                <div class="overflow-hidden transition-all duration-300" style="max-height: {expandedArticleId === article.id ? '2000px' : '4.5em'};">
-                  <p class="text-gray-700 dark:text-gray-300">{@html getDisplayContent(article)}</p>
+                <div class="overflow-hidden transition-all duration-300" style="max-height: {isArticleExpanded(index) ? '2000px' : '4.5em'};">
+                  <p class="text-gray-700 dark:text-gray-300">{@html getDisplayContent(article, index)}</p>
                 </div>
               </div>
-              <div class="flex items-center gap-2 ml-4" on:click|stopPropagation role="presentation">
-                <button on:click={() => toggleStarred(article.id!, article.starred)} class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">{article.starred ? '⭐' : '☆'}</button>
-                {#if !article.read}<button on:click={() => markAsRead(article.id!)} class="px-2 py-1 text-xs bg-blue-600 text-white rounded">Mark read</button>{/if}
+              <div class="flex items-center gap-2 ml-4" role="presentation">
+                <button onclick={() => toggleStarred(article.id!, article.starred)} class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">{article.starred ? '⭐' : '☆'}</button>
+                {#if !article.read}<button onclick={() => markAsRead(article.id!)} class="px-2 py-1 text-xs bg-blue-600 text-white rounded">Mark read</button>{/if}
               </div>
             </div>
             <div class="text-center mt-2">
-              <span class="text-xs text-gray-400">{expandedArticleId === article.id ? '▲ Click to collapse' : '▼ Click to read more'}</span>
+              <span class="text-xs text-gray-400">{isArticleExpanded(index) ? '▲ Click to collapse' : '▼ Click to read more'}</span>
             </div>
           </div>
         {/each}
@@ -487,18 +518,18 @@ let folderSearchQuery = '';
 </div>
 
 {#if showAddModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" on:click|self={closeModal} on:keydown={(e) => e.key === 'Escape' && closeModal()} role="dialog" aria-modal="true" tabindex="-1">
-    <form class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6" on:submit|preventDefault>
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal} onkeydown={(e) => e.key === 'Escape' && closeModal()} role="dialog" aria-modal="true" tabindex="-1">
+    <form class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">
           {editingId ? (addMode === 'feed' ? 'Edit Feed' : addMode === 'folder' ? 'Edit Folder' : 'Edit View') : (addMode === 'feed' ? 'Add Feed' : addMode === 'folder' ? 'Add Folder' : 'Add View')}
         </h2>
-        <button on:click={closeModal} class="text-gray-500 hover:text-gray-700" aria-label="Close">✕</button>
+        <button onclick={closeModal} class="text-gray-500 hover:text-gray-700" aria-label="Close">✕</button>
       </div>
       <div class="flex mb-4 border-b border-gray-200 dark:border-gray-700">
-        <button class="flex-1 py-2 text-center {addMode === 'feed' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" on:click={() => addMode = 'feed'}>Feed</button>
-        <button class="flex-1 py-2 text-center {addMode === 'folder' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" on:click={() => addMode = 'folder'}>Folder</button>
-        <button class="flex-1 py-2 text-center {addMode === 'view' ? 'border-b-2 border-green-600 text-green-600' : 'text-gray-500'}" on:click={() => addMode = 'view'}>View</button>
+        <button class="flex-1 py-2 text-center {addMode === 'feed' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'feed'}>Feed</button>
+        <button class="flex-1 py-2 text-center {addMode === 'folder' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'folder'}>Folder</button>
+        <button class="flex-1 py-2 text-center {addMode === 'view' ? 'border-b-2 border-green-600 text-green-600' : 'text-gray-500'}" onclick={() => addMode = 'view'}>View</button>
       </div>
       
       {#if addMode === 'feed'}
@@ -520,7 +551,7 @@ let folderSearchQuery = '';
 				{#each filteredFolders as folder}<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={folder.id} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">{folder.name}</span></label>{/each}
 			</div></div>
 			{#if feedError}<p class="text-red-500 text-sm">{feedError}</p>{/if}
-			<button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded disabled:opacity-50" on:click={addFeed} disabled={feedLoading}>{feedLoading ? 'Saving...' : (editingId ? 'Update Feed' : 'Add Feed')}</button>
+			<button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded disabled:opacity-50" onclick={addFeed} disabled={feedLoading}>{feedLoading ? 'Saving...' : (editingId ? 'Update Feed' : 'Add Feed')}</button>
         </div>
       {:else if addMode === 'folder'}
         <div class="space-y-4">
@@ -531,7 +562,7 @@ let folderSearchQuery = '';
               <option value={null}>No parent (root)</option>
               {#each availableParentFolders as f}<option value={f.id}>{f.name}</option>{/each}</select></div>
           {#if folderError}<p class="text-red-500 text-sm">{folderError}</p>{/if}
-          <button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded" on:click={addFolder}>{editingId ? 'Update Folder' : 'Add Folder'}</button>
+          <button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded" onclick={addFolder}>{editingId ? 'Update Folder' : 'Add Folder'}</button>
         </div>
       {:else}
         <div class="space-y-4">
@@ -542,7 +573,7 @@ let folderSearchQuery = '';
           <div><label for="view-starred" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Filter: Starred</label>
             <select id="view-starred" bind:value={viewFilterStarred} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700"><option value="all">All</option><option value="starred">Starred only</option></select></div>
           {#if viewError}<p class="text-red-500 text-sm">{viewError}</p>{/if}
-          <button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded" on:click={addView}>{editingId ? 'Update View' : 'Add View'}</button>
+          <button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded" onclick={addView}>{editingId ? 'Update View' : 'Add View'}</button>
         </div>
       {/if}
     </form>
