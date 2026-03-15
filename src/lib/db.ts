@@ -1,5 +1,8 @@
 import Dexie, { type Table } from 'dexie';
 
+// Import text segmenter for search
+import { segmentWords, generateAllNgrams } from './text-segmenter';
+
 export interface User {
   id?: number;
   name: string;
@@ -163,6 +166,20 @@ export async function getUserArticles(userId: number): Promise<Article[]> {
   return db.articles.where('userId').equals(userId).toArray();
 }
 
+// Get total article counts for a user (without pagination limits)
+export async function getUserArticleCounts(userId: number): Promise<{ total: number; unread: number }> {
+  const total = await db.articles.where('userId').equals(userId).count();
+  const unread = await db.articles.where('userId').equals(userId).and(a => !a.read).count();
+  return { total, unread };
+}
+
+// Get article counts for a specific feed
+export async function getFeedArticleCounts(userId: number, feedId: number): Promise<{ total: number; unread: number }> {
+  const total = await db.articles.where('userId').equals(userId).and(a => a.feedId === feedId).count();
+  const unread = await db.articles.where('userId').equals(userId).and(a => a.feedId === feedId && !a.read).count();
+  return { total, unread };
+}
+
 // Sort options for articles
 export type SortOption = 'pubDateDesc' | 'pubDateAsc' | 'titleAsc' | 'titleDesc';
 
@@ -190,4 +207,157 @@ export async function getUserArticlesSorted(userId: number, sortBy: SortOption =
   
   // Filter by userId after sorting (Dexie doesn't support compound queries well with indexes)
   return collection.filter(article => article.userId === userId);
+}
+
+// Get paginated articles with optional filtering
+export async function getPaginatedArticles(
+  userId: number,
+  options: {
+    feedId?: number;
+    folderId?: number;
+    read?: boolean;
+    starred?: boolean;
+    sortBy?: SortOption;
+    limit?: number;
+    offset?: number;
+  } = {}
+): Promise<{ articles: Article[]; hasMore: boolean }> {
+  const limit = options.limit ?? 25;
+  const offset = options.offset ?? 0;
+  
+  // Get all user articles
+  let articles = await db.articles.where('userId').equals(userId).toArray();
+  
+  // Apply filters
+  if (options.feedId !== undefined) {
+    articles = articles.filter(a => a.feedId === options.feedId);
+  }
+  if (options.folderId !== undefined) {
+    // Get feed IDs in folder
+    const feedsInFolder = await db.feeds.where('userId').equals(userId).toArray();
+    const folderFeedIds = feedsInFolder.filter(f => f.folderId === options.folderId).map(f => f.id!);
+    // Get child folder feed IDs recursively
+    const childFolders = await db.folders.where('userId').equals(userId).toArray();
+    const getChildFolderIds = (parentId: number): number[] => {
+      const childIds = childFolders.filter(f => f.parentId === parentId).map(f => f.id!);
+      return [...childIds, ...childIds.flatMap(id => getChildFolderIds(id))];
+    };
+    const childFolderIds = getChildFolderIds(options.folderId);
+    const allFolderFeedIds = [...folderFeedIds, ...feedsInFolder
+      .filter(f => childFolderIds.includes(f.folderId!))
+      .map(f => f.id!)];
+    articles = articles.filter(a => allFolderFeedIds.includes(a.feedId));
+  }
+  if (options.read !== undefined) {
+    articles = articles.filter(a => a.read === options.read);
+  }
+  if (options.starred !== undefined) {
+    articles = articles.filter(a => a.starred === options.starred);
+  }
+  
+  // Sort
+  const sortBy = options.sortBy ?? 'pubDateDesc';
+  articles.sort((a, b) => {
+    switch (sortBy) {
+      case 'pubDateDesc':
+        return (b.pubDate || 0) - (a.pubDate || 0);
+      case 'pubDateAsc':
+        return (a.pubDate || 0) - (b.pubDate || 0);
+      case 'titleAsc':
+        return (a.title || '').localeCompare(b.title || '');
+      case 'titleDesc':
+        return (b.title || '').localeCompare(a.title || '');
+      default:
+        return (b.pubDate || 0) - (a.pubDate || 0);
+    }
+  });
+  
+  const hasMore = articles.length > offset + limit;
+  return {
+    articles: articles.slice(offset, offset + limit),
+    hasMore
+  };
+}
+
+// Full-text search function that searches indexed fields
+// Segments the search query into words and ngrams and matches against indexed arrays
+export async function searchArticles(
+  userId: number,
+  query: string,
+  options: {
+    feedId?: number;
+    read?: boolean;
+    starred?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {}
+): Promise<Article[]> {
+  const limit = options.limit ?? 25;
+  const offset = options.offset ?? 0;
+  
+  if (!query || !query.trim()) {
+    // If no query, return filtered articles with pagination
+    let collection = db.articles.where('userId').equals(userId);
+    
+    if (options.feedId !== undefined) {
+      collection = collection.and(a => a.feedId === options.feedId);
+    }
+    if (options.read !== undefined) {
+      collection = collection.and(a => a.read === options.read);
+    }
+    if (options.starred !== undefined) {
+      collection = collection.and(a => a.starred === options.starred);
+    }
+    
+    // Apply ordering by pubDate descending and pagination
+    const articles = await collection.toArray();
+    // Sort and paginate in memory (Dexie doesn't support offset well)
+    return articles
+      .sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0))
+      .slice(offset, offset + limit);
+  }
+  
+  // Segment query into words and ngrams
+  const words = segmentWords(query);
+  const ngrams = generateAllNgrams(words, 3);
+  const searchTerms = [...new Set([...words, ...ngrams])]; // Dedupe
+  
+  if (searchTerms.length === 0) {
+    return [];
+  }
+  
+  // Get all user articles and filter in memory
+  let articles = await db.articles.where('userId').equals(userId).toArray();
+  
+  // Apply additional filters
+  if (options.feedId !== undefined) {
+    articles = articles.filter(a => a.feedId === options.feedId);
+  }
+  if (options.read !== undefined) {
+    articles = articles.filter(a => a.read === options.read);
+  }
+  if (options.starred !== undefined) {
+    articles = articles.filter(a => a.starred === options.starred);
+  }
+  console.log(searchTerms);
+  // Filter by search terms in indexed fields
+  const matchingArticles = articles.filter(article => {
+    const searchableFields = [
+      ...(article.titleWords || []),
+      ...(article.snippetWords || []),
+      ...(article.siteContentWords || []),
+      ...(article.titleNgrams || []),
+      ...(article.snippetNgrams || []),
+      ...(article.siteContentNgrams || [])
+    ];
+    
+    return searchTerms.some(term => 
+      searchableFields.some(field => field.includes(term))
+    );
+  });
+  
+  // Sort by pubDate descending and paginate
+  return matchingArticles
+    .sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0))
+    .slice(offset, offset + limit);
 }

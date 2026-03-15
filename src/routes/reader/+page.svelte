@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, type SortOption } from '$lib/db';
+import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 import { SvelteSet } from 'svelte/reactivity';
 
@@ -42,8 +42,17 @@ let viewError = $state('');
 // Sort option
 let sortBy: SortOption = $state('pubDateDesc');
 
+// Pagination state
+let articleOffset = $state(0);
+let hasMoreArticles = $state(true);
+let isLoadingMore = $state(false);
+let loadTrigger: HTMLDivElement | null = $state(null);
+
 // Folder search
 let folderSearchQuery = $state('');
+
+// Total article counts (unpaginated)
+let totalArticleCounts = $state({ total: 0, unread: 0 });
 
 
 const filteredFolders = $derived(
@@ -88,9 +97,17 @@ const filteredArticles = $derived(
     }
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      return article.title.toLowerCase().includes(query) ||
-	  	article.snippet.toLowerCase().includes(query) ||
-		article.siteContent?.toLowerCase().includes(query);
+      // Use full-text search index fields for matching
+      // Check if any indexed field contains any word from the query
+      const searchWords = query.split(/\s+/).filter(w => w.length >= 2);
+      return searchWords.length > 0 && (
+        article.titleWords?.some(w => searchWords.some(sw => w.includes(sw))) ||
+        article.snippetWords?.some(w => searchWords.some(sw => w.includes(sw))) ||
+        article.siteContentWords?.some(w => searchWords.some(sw => w.includes(sw))) ||
+        article.titleNgrams?.some(n => searchWords.some(sw => n.includes(sw))) ||
+        article.snippetNgrams?.some(n => searchWords.some(sw => n.includes(sw))) ||
+        article.siteContentNgrams?.some(n => searchWords.some(sw => n.includes(sw)))
+      );
     }
     return true;
   })
@@ -111,21 +128,55 @@ const currentUserName = $derived(
 );
 
 const unreadCount = $derived(
-  articles.filter(a => !a.read).length
+  totalArticleCounts.unread
 );
 
-  onMount(async () => {
-    await loadUsers();
-    await loadData();
+const totalCount = $derived(
+  totalArticleCounts.total
+);
+
+  let observer: IntersectionObserver | null = null;
+  
+  onMount(() => {
+    // Initialize async operations
+    (async () => {
+      await loadUsers();
+      await loadData();
+    })();
     
-    // Listen for refresh complete messages from background script
+    // Set up Intersection Observer for infinite scroll
     if (browser) {
+      // Wait for the DOM to be ready, then observe
+      setTimeout(() => {
+        if (loadTrigger) {
+          observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && hasMoreArticles && !isLoadingMore) {
+              loadMore();
+            }
+          }, { rootMargin: '100px' });
+          observer.observe(loadTrigger);
+        }
+      }, 100);
+      
+      // Listen for refresh complete messages from background script
       chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'refresh-complete') {
           loadData();
         }
       });
     }
+    
+    return () => {
+      if (observer) observer.disconnect();
+    };
+  });
+  
+  // React to search query changes
+  $effect(() => {
+    // Track searchQuery dependency
+    const _ = searchQuery;
+    // Reload data when search changes
+    loadData();
   });
 
   async function loadUsers() {
@@ -157,7 +208,56 @@ const unreadCount = $derived(
     feeds = await db.feeds.where('userId').equals(currentUserId).toArray();
     folders = await db.folders.where('userId').equals(currentUserId).toArray();
     views = await db.views.where('userId').equals(currentUserId).toArray();
-    articles = await getUserArticlesSorted(currentUserId, sortBy);
+    
+    // Load total article counts (unpaginated)
+    totalArticleCounts = await getUserArticleCounts(currentUserId);
+    
+    // Reset pagination and load first 25 articles
+    articleOffset = 0;
+    
+    if (searchQuery) {
+      // Use search with pagination
+      const searchResults = await searchArticles(currentUserId, searchQuery, { limit: 25, offset: 0 });
+      articles = searchResults;
+      hasMoreArticles = searchResults.length >= 25;
+    } else {
+      // Use paginated articles
+      const result = await getPaginatedArticles(currentUserId, { 
+        feedId: selectedFeedId ?? undefined,
+        folderId: selectedFolderId ?? undefined,
+        sortBy,
+        limit: 25,
+        offset: 0
+      });
+      articles = result.articles;
+      hasMoreArticles = result.hasMore;
+    }
+  }
+  
+  async function loadMore() {
+    if (isLoadingMore || !hasMoreArticles || !currentUserId) return;
+    
+    isLoadingMore = true;
+    const nextOffset = articleOffset + 25;
+    
+    if (searchQuery) {
+      const moreResults = await searchArticles(currentUserId, searchQuery, { limit: 25, offset: nextOffset });
+      articles = [...articles, ...moreResults];
+      hasMoreArticles = moreResults.length >= 25;
+    } else {
+      const result = await getPaginatedArticles(currentUserId, {
+        feedId: selectedFeedId ?? undefined,
+        folderId: selectedFolderId ?? undefined,
+        sortBy,
+        limit: 25,
+        offset: nextOffset
+      });
+      articles = [...articles, ...result.articles];
+      hasMoreArticles = result.hasMore;
+    }
+    
+    articleOffset = nextOffset;
+    isLoadingMore = false;
   }
 
   function selectAllArticles() { selectedViewId = null; selectedFolderId = null; selectedFeedId = null; }
@@ -394,7 +494,7 @@ const unreadCount = $derived(
       <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
       <ul>
         <li class="group">
-          <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={selectAllArticles} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount})</span></div>
+          <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={selectAllArticles} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount}/{totalCount})</span></div>
         </li>
         {#each folders.filter(f => !f.parentId) as folder}
           {@const childFolders = folders.filter(f => f.parentId === folder.id)}
@@ -500,8 +600,8 @@ const unreadCount = $derived(
                   <a href={article.link} target="_blank" rel="noopener noreferrer" class="hover:underline text-blue-600 dark:text-blue-400">{article.title}</a>
                 </h3>
                 <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>
-                <div class="overflow-hidden transition-all duration-300" style="max-height: {isArticleExpanded(index) ? '2000px' : '4.5em'};">
-                  <p class="text-gray-700 dark:text-gray-300">{@html getDisplayContent(article, index)}</p>
+                <div class="overflow-hidden transition-all duration-300 article-content" style="max-height: {isArticleExpanded(index) ? '2000px' : '4.5em'};">
+                  <div class="text-gray-700 dark:text-gray-300">{@html getDisplayContent(article, index)}</div>
                 </div>
               </div>
               <div class="flex items-center gap-2 ml-4" role="presentation">
@@ -514,6 +614,14 @@ const unreadCount = $derived(
             </div>
           </div>
         {/each}
+        <!-- Load more trigger for infinite scroll -->
+        <div bind:this={loadTrigger} class="h-4">
+          {#if isLoadingMore}
+            <p class="text-center text-gray-500 py-2">Loading more...</p>
+          {:else if !hasMoreArticles && filteredArticles.length > 0}
+            <p class="text-center text-gray-400 py-2">No more articles</p>
+          {/if}
+        </div>
       {/if}
     </div>
   </main>
