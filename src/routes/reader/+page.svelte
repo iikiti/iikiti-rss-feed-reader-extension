@@ -4,6 +4,7 @@ import { browser } from '$app/environment';
 import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, getFeedArticleCounts, getFolderArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 import { SvelteSet } from 'svelte/reactivity';
+import SidebarItem from '$lib/components/sidebar/SidebarItem.svelte';
 
 let currentUserId: number | null = $state(null);
 let users: { id?: number; name: string; createdAt: number }[] = $state([]);
@@ -675,207 +676,71 @@ const totalCount = $derived(
 		    <button onclick={() => openAddModal('view')} class="flex-1 text-xs bg-green-600 text-white py-1 rounded">+ View</button>
 		  </div>
 		  
-		  <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Views</div>
-		  <ul class="mb-3">
-		    {#each views as view}
-		      <li class="group">
-		        <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedViewId === view.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectView(view.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectView(view.id!)}>
-		          <span class="flex justify-between items-center">
-		            <span>👁️ {view.name}</span>
-		            <span class="hidden group-hover:inline-flex gap-1">
-		              <button onclick={() => openAddModal('view', view)} class="text-blue-500 p-1" aria-label="Edit view">✏️</button>
-		              <button onclick={() => deleteView(view.id!)} class="text-red-500 p-1" aria-label="Delete view">🗑️</button>
-		            </span>
-		          </span>
-		        </div>
-		      </li>
-		    {/each}
-		  </ul>
+	  <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Views</div>
+	  <ul class="mb-3">
+	    {#each views as view}
+	      <SidebarItem
+	        type="view"
+	        {view}
+	        selected={selectedViewId === view.id}
+	        onselect={() => selectView(view.id!)}
+	        onedit={() => openAddModal('view', view)}
+	        ondelete={() => deleteView(view.id!)}
+	      />
+	    {/each}
+	  </ul>
 		  
 		  <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
 		  <ul>
 		    <li class="group">
 		      <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={selectAllArticles} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount}/{totalCount})</span></div>
 		    </li>
-		    {#each sortedRootFolders as folder}
-		      {@const childFolders = getSortedChildFolders(folder.id!)}
-		      {@const folderFeeds = getSortedFeedsInFolder(folder.id!)}
-		      {@const folderCount = folderCounts[folder.id!] || { total: 0, unread: 0 }}
-		      <li class="group" 
-		        draggable="true"
-		        ondragstart={(e) => handleDragStart(e, 'folder', folder.id!)}
-		        ondragover={(e) => handleDragOver(e, 'folder', folder.id!)}
-		        ondragleave={(e) => handleDragLeave(e)}
-		        ondrop={(e) => handleDrop(e, 'folder', folder.id!)}
-		        ondragend={handleDragEnd}
-		        class:rounded-t={dragOverItem?.id === folder.id && dragOverItem?.position === 'above'}
-		        class:rounded-b={dragOverItem?.id === folder.id && dragOverItem?.position === 'below'}
-		        class:border-t-2={dragOverItem?.id === folder.id && dragOverItem?.position === 'above'}
-		        class:border-b-2={dragOverItem?.id === folder.id && dragOverItem?.position === 'below'}
-		        class:border-blue-500={dragOverItem?.id === folder.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
-		        class:bg-blue-50={dragOverItem?.id === folder.id && dragOverItem?.position === 'on'}
-		      >
-		        <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === folder.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(folder.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(folder.id!)}>
-		          <span class="flex justify-between items-center">
-		            <span class="flex items-center gap-1">
-		              <button 
-		                onclick={(e) => { e.stopPropagation(); toggleFolderExpand(folder.id!); }} 
-		                class="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-		                aria-label={isFolderExpanded(folder.id!) ? 'Collapse folder' : 'Expand folder'}
-		              >
-		                {isFolderExpanded(folder.id!) ? '▼' : '▶'}
-		              </button>
-		              <span>📁 {folder.name}</span>
-		            </span>
-		            <span class="flex items-center gap-2">
-		              <span class="text-xs text-gray-500">{folderCount.unread}/{folderCount.total}</span>
-		              <span class="hidden group-hover:inline-flex gap-1">
-		                <button onclick={(e) => { e.stopPropagation(); openAddModal('folder', folder); }} class="text-blue-500 p-1" aria-label="Edit folder">✏️</button>
-		                <button onclick={(e) => { e.stopPropagation(); deleteFolder(folder.id!); }} class="text-red-500 p-1" aria-label="Delete folder">🗑️</button>
-		              </span>
-		            </span>
-		          </span>
-		        </div>
-		        {#if isFolderExpanded(folder.id!)}
-		          <ul>
-		            {#each childFolders as child}
-		            {@const childFeeds = getSortedFeedsInFolder(child.id!)}
-		            {@const childCount = folderCounts[child.id!] || { total: 0, unread: 0 }}
-		            <li class="group"
-		              draggable="true"
-		              ondragstart={(e) => handleDragStart(e, 'folder', child.id!)}
-		              ondragover={(e) => handleDragOver(e, 'folder', child.id!)}
-		              ondragleave={(e) => handleDragLeave(e)}
-		              ondrop={(e) => handleDrop(e, 'folder', child.id!)}
-		              ondragend={handleDragEnd}
-		              class:rounded-t={dragOverItem?.id === child.id && dragOverItem?.position === 'above'}
-		              class:rounded-b={dragOverItem?.id === child.id && dragOverItem?.position === 'below'}
-		              class:border-t-2={dragOverItem?.id === child.id && dragOverItem?.position === 'above'}
-		              class:border-b-2={dragOverItem?.id === child.id && dragOverItem?.position === 'below'}
-		              class:border-blue-500={dragOverItem?.id === child.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
-		              class:bg-blue-50={dragOverItem?.id === child.id && dragOverItem?.position === 'on'}
-		            >
-		            <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 font-medium {selectedFolderId === child.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFolder(child.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFolder(child.id!)}>
-		              <span class="flex justify-between items-center">
-		                <span class="flex items-center gap-1">
-		                  <button 
-		                    onclick={(e) => { e.stopPropagation(); toggleFolderExpand(child.id!); }} 
-		                    class="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
-		                    aria-label={isFolderExpanded(child.id!) ? 'Collapse folder' : 'Expand folder'}
-		                  >
-		                    {isFolderExpanded(child.id!) ? '▼' : '▶'}
-		                  </button>
-		                  <span>📁 {child.name}</span>
-		                </span>
-		                <span class="flex items-center gap-2">
-		                  <span class="text-xs text-gray-500">{childCount.unread}/{childCount.total}</span>
-		                  <span class="hidden group-hover:inline-flex gap-1">
-		                    <button onclick={(e) => { e.stopPropagation(); openAddModal('folder', child); }} class="text-blue-500 p-1" aria-label="Edit child folder">✏️</button>
-		                    <button onclick={(e) => { e.stopPropagation(); deleteFolder(child.id!); }} class="text-red-500 p-1" aria-label="Delete child folder">🗑️</button>
-		                  </span>
-		                </span>
-		              </span>
-		            </div>
-		            {#if isFolderExpanded(child.id!)}
-		            <ul>
-		              {#each childFeeds as feed}
-		                {@const feedCount = feedCounts[feed.id!] || { total: 0, unread: 0 }}
-		                <li class="group"
-		                  draggable="true"
-		                  ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
-		                  ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
-		                  ondragleave={(e) => handleDragLeave(e)}
-		                  ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
-		                  ondragend={handleDragEnd}
-		                  class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
-		                  class:rounded-b={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
-		                  class:border-t-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
-		                  class:border-b-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
-		                  class:border-blue-500={dragOverItem?.id === feed.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
-		                  class:bg-blue-50={dragOverItem?.id === feed.id && dragOverItem?.position === 'on'}
-		                >
-		                  <div class="w-full text-left px-10 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
-		                    <span class="flex justify-between items-center">
-		                      <span>📰 {feed.title}</span>
-		                      <span class="flex items-center gap-2">
-		                        <span class="text-xs text-gray-500">{feedCount.unread}/{feedCount.total}</span>
-		                        <span class="hidden group-hover:inline-flex gap-1">
-		                          <button onclick={(e) => { e.stopPropagation(); openAddModal('feed', feed); }} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-		                          <button onclick={(e) => { e.stopPropagation(); deleteFeed(feed.id!); }} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
-		                        </span>
-		                      </span>
-		                    </span>
-		                  </div>
-		                </li>
-		              {/each}
-		              </ul>
-		            {/if}
-		        </li>
-		          {/each}
-		          {#each folderFeeds as feed}
-		            {@const feedCount = feedCounts[feed.id!] || { total: 0, unread: 0 }}
-		            <li class="group"
-		              draggable="true"
-		              ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
-		              ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
-		              ondragleave={(e) => handleDragLeave(e)}
-		              ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
-		              ondragend={handleDragEnd}
-		              class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
-		              class:rounded-b={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
-		              class:border-t-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
-		              class:border-b-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
-		              class:border-blue-500={dragOverItem?.id === feed.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
-		              class:bg-blue-50={dragOverItem?.id === feed.id && dragOverItem?.position === 'on'}
-		            >
-		              <div class="w-full text-left px-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
-		                <span class="flex justify-between items-center">
-		                  <span>📰 {feed.title}</span>
-		                  <span class="flex items-center gap-2">
-		                    <span class="text-xs text-gray-500">{feedCount.unread}/{feedCount.total}</span>
-		                    <span class="hidden group-hover:inline-flex gap-1">
-		                      <button onclick={(e) => { e.stopPropagation(); openAddModal('feed', feed); }} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-		                      <button onclick={(e) => { e.stopPropagation(); deleteFeed(feed.id!); }} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
-		                    </span>
-		                  </span>
-		                </span>
-		              </div>
-		            </li>
-		          {/each}
-		          </ul>
-		        {/if}
-		      </li>
-		    {/each}
-		    {#each sortedUnfolderedFeeds as feed}
-		      {@const feedCount = feedCounts[feed.id!] || { total: 0, unread: 0 }}
-		      <li class="group"
-		        draggable="true"
-		        ondragstart={(e) => handleDragStart(e, 'feed', feed.id!)}
-		        ondragover={(e) => handleDragOver(e, 'feed', feed.id!)}
-		        ondragleave={(e) => handleDragLeave(e)}
-		        ondrop={(e) => handleDrop(e, 'feed', feed.id!)}
-		        ondragend={handleDragEnd}
-		        class:rounded-t={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
-		        class:rounded-b={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
-		        class:border-t-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'above'}
-		        class:border-b-2={dragOverItem?.id === feed.id && dragOverItem?.position === 'below'}
-		        class:border-blue-500={dragOverItem?.id === feed.id && (dragOverItem?.position === 'above' || dragOverItem?.position === 'below')}
-		        class:bg-blue-50={dragOverItem?.id === feed.id && dragOverItem?.position === 'on'}
-		      >
-		        <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-sm {selectedFeedId === feed.id ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={() => selectFeed(feed.id!)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectFeed(feed.id!)}>
-		          <span class="flex justify-between items-center">
-		            <span>📰 {feed.title}</span>
-		            <span class="flex items-center gap-2">
-		              <span class="text-xs text-gray-500">{feedCount.unread}/{feedCount.total}</span>
-		              <span class="hidden group-hover:inline-flex gap-1">
-		                <button onclick={(e) => { e.stopPropagation(); openAddModal('feed', feed); }} class="text-blue-500 p-1" aria-label="Edit feed">✏️</button>
-		                <button onclick={(e) => { e.stopPropagation(); deleteFeed(feed.id!); }} class="text-red-500 p-1" aria-label="Delete feed">🗑️</button>
-		              </span>
-		            </span>
-		          </span>
-		        </div>
-		      </li>
-		    {/each}
+	    {#each sortedRootFolders as folder}
+	      <SidebarItem
+	        type="folder"
+	        {folder}
+	        folderCount={folderCounts[folder.id!] || { total: 0, unread: 0 }}
+	        allFolders={folders}
+	        allFeeds={feeds}
+	        {feedCounts}
+	        {folderCounts}
+	        {expandedFolders}
+	        {selectedFeedId}
+	        {selectedFolderId}
+	        {dragOverItem}
+	        depth={0}
+	        onSelectFolder={selectFolder}
+	        onSelectFeed={selectFeed}
+	        onEditFolder={(f: Folder) => openAddModal('folder', f)}
+	        onDeleteFolder={deleteFolder}
+	        onEditFeed={(f: Feed) => openAddModal('feed', f)}
+	        onDeleteFeed={deleteFeed}
+	        {toggleFolderExpand}
+	        {handleDragStart}
+	        {handleDragOver}
+	        {handleDragLeave}
+	        {handleDrop}
+	        {handleDragEnd}
+	      />
+	    {/each}
+	    {#each sortedUnfolderedFeeds as feed}
+	      <SidebarItem
+	        type="feed"
+	        {feed}
+	        feedCount={feedCounts[feed.id!] || { total: 0, unread: 0 }}
+	        selected={selectedFeedId === feed.id}
+	        depth={0}
+	        {dragOverItem}
+	        onselect={() => selectFeed(feed.id!)}
+	        onedit={() => openAddModal('feed', feed)}
+	        ondelete={() => deleteFeed(feed.id!)}
+	        {handleDragStart}
+	        {handleDragOver}
+	        {handleDragLeave}
+	        {handleDrop}
+	        {handleDragEnd}
+	      />
+	    {/each}
 		  </ul>
 		</div>
 	</aside>
