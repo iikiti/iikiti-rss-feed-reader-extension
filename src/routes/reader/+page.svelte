@@ -462,10 +462,10 @@ const totalCount = $derived(
 		isLoadingMore = false;
 	}
 
-	function selectAllArticles() { selectedViewId = null; selectedFolderId = null; selectedFeedId = null; }
-	function selectView(id: number) { selectedViewId = id; selectedFolderId = null; selectedFeedId = null; }
-	function selectFolder(id: number) { selectedViewId = null; selectedFolderId = id; selectedFeedId = null; }
-	function selectFeed(id: number) { selectedViewId = null; selectedFolderId = null; selectedFeedId = id; }
+	function selectAllArticles() { selectedViewId = null; selectedFolderId = null; selectedFeedId = null; loadData(); }
+	function selectView(id: number) { selectedViewId = id; selectedFolderId = null; selectedFeedId = null; loadData(); }
+	function selectFolder(id: number) { selectedViewId = null; selectedFolderId = id; selectedFeedId = null; loadData(); }
+	function selectFeed(id: number) { selectedViewId = null; selectedFolderId = null; selectedFeedId = id; loadData(); }
 
 	function handleSortChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
