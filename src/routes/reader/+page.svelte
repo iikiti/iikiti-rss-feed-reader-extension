@@ -4,7 +4,9 @@ import { browser } from '$app/environment';
 import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, getFeedArticleCounts, getFolderArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 import { SvelteSet } from 'svelte/reactivity';
-import SidebarItem from '$lib/components/sidebar/SidebarItem.svelte';
+import ReaderHeader from '$lib/components/reader/ReaderHeader.svelte';
+import ReaderSidebar from '$lib/components/reader/ReaderSidebar.svelte';
+import ArticleList from '$lib/components/reader/ArticleList.svelte';
 
 let currentUserId: number | null = $state(null);
 let users: { id?: number; name: string; createdAt: number }[] = $state([]);
@@ -645,162 +647,62 @@ const totalCount = $derived(
 </script>
 
 <div class="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
-	<aside class="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
-		<div class="p-4 border-b border-gray-200 dark:border-gray-700">
-		  <div class="flex justify-between items-center mb-2">
-		    <h1 class="text-xl font-bold">iikiti</h1>
-		    <div class="flex items-center space-x-1">
-		      <button onclick={() => openAddModal('feed')} class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1" title="Add">+</button>
-		      <a href="/settings" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
-		    </div>
-		  </div>
-		  <!-- User Switcher -->
-		  <div class="text-sm">
-		    <label for="user-select" class="text-xs text-gray-500">User:</label>
-		    <select 
-		      id="user-select"
-		      value={currentUserId} 
-		      onchange={(e) => switchUser(parseInt(e.currentTarget.value))}
-		      class="w-full mt-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-sm"
-		    >
-		      {#each users as user}
-		        <option value={user.id}>{user.name}</option>
-		      {/each}
-		    </select>
-		  </div>
-		</div>
-		<div class="p-2 overflow-y-auto flex-1">
-		  <div class="mb-2 flex gap-1">
-		    <button onclick={() => openAddModal('feed')} class="flex-1 text-xs bg-blue-600 text-white py-1 rounded">+ Feed</button>
-		    <button onclick={() => openAddModal('folder')} class="flex-1 text-xs bg-gray-600 text-white py-1 rounded">+ Folder</button>
-		    <button onclick={() => openAddModal('view')} class="flex-1 text-xs bg-green-600 text-white py-1 rounded">+ View</button>
-		  </div>
-		  
-	  <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Views</div>
-	  <ul class="mb-3">
-	    {#each views as view}
-	      <SidebarItem
-	        type="view"
-	        {view}
-	        selected={selectedViewId === view.id}
-	        onselect={() => selectView(view.id!)}
-	        onedit={() => openAddModal('view', view)}
-	        ondelete={() => deleteView(view.id!)}
-	      />
-	    {/each}
-	  </ul>
-		  
-		  <div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
-		  <ul>
-		    <li class="group">
-		      <div class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}" onclick={selectAllArticles} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && selectAllArticles()}>All Articles <span class="text-xs text-gray-500">({unreadCount}/{totalCount})</span></div>
-		    </li>
-	    {#each sortedRootFolders as folder}
-	      <SidebarItem
-	        type="folder"
-	        {folder}
-	        folderCount={folderCounts[folder.id!] || { total: 0, unread: 0 }}
-	        allFolders={folders}
-	        allFeeds={feeds}
-	        {feedCounts}
-	        {folderCounts}
-	        {expandedFolders}
-	        {selectedFeedId}
-	        {selectedFolderId}
-	        {dragOverItem}
-	        depth={0}
-	        onSelectFolder={selectFolder}
-	        onSelectFeed={selectFeed}
-	        onEditFolder={(f: Folder) => openAddModal('folder', f)}
-	        onDeleteFolder={deleteFolder}
-	        onEditFeed={(f: Feed) => openAddModal('feed', f)}
-	        onDeleteFeed={deleteFeed}
-	        {toggleFolderExpand}
-	        {handleDragStart}
-	        {handleDragOver}
-	        {handleDragLeave}
-	        {handleDrop}
-	        {handleDragEnd}
-	      />
-	    {/each}
-	    {#each sortedUnfolderedFeeds as feed}
-	      <SidebarItem
-	        type="feed"
-	        {feed}
-	        feedCount={feedCounts[feed.id!] || { total: 0, unread: 0 }}
-	        selected={selectedFeedId === feed.id}
-	        depth={0}
-	        {dragOverItem}
-	        onselect={() => selectFeed(feed.id!)}
-	        onedit={() => openAddModal('feed', feed)}
-	        ondelete={() => deleteFeed(feed.id!)}
-	        {handleDragStart}
-	        {handleDragOver}
-	        {handleDragLeave}
-	        {handleDrop}
-	        {handleDragEnd}
-	      />
-	    {/each}
-		  </ul>
-		</div>
-	</aside>
+	<ReaderSidebar
+		{currentUserId}
+		{users}
+		{feeds}
+		{folders}
+		{views}
+		{feedCounts}
+		{folderCounts}
+		{expandedFolders}
+		{selectedFeedId}
+		{selectedFolderId}
+		{selectedViewId}
+		{unreadCount}
+		{totalCount}
+		{dragOverItem}
+		{sortedRootFolders}
+		{sortedUnfolderedFeeds}
+		onSwitchUser={switchUser}
+		onOpenAddModal={openAddModal}
+		onSelectAllArticles={selectAllArticles}
+		onSelectView={selectView}
+		onSelectFolder={selectFolder}
+		onSelectFeed={selectFeed}
+		onDeleteView={deleteView}
+		onDeleteFolder={deleteFolder}
+		onDeleteFeed={deleteFeed}
+		onEditFolder={(f) => openAddModal('folder', f)}
+		onEditFeed={(f) => openAddModal('feed', f)}
+		{toggleFolderExpand}
+		{handleDragStart}
+		{handleDragOver}
+		{handleDragLeave}
+		{handleDrop}
+		{handleDragEnd}
+	/>
 
-	<main class="flex-1 flex flex-col">
-		<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-		  <h2 class="font-semibold text-lg">{currentTitle} <button onclick={() => refreshFeeds()}>Refresh</button></h2>
-		  <div class="flex items-center gap-2">
-		    <input type="search" placeholder="Search..." bind:value={searchQuery} class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700" />
-		    <select 
-		      value={sortBy} 
-		      onchange={handleSortChange}
-		      class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700"
-		    >
-		      <option value="pubDateDesc">Newest First</option>
-		      <option value="pubDateAsc">Oldest First</option>
-		      <option value="titleAsc">Title A-Z</option>
-		      <option value="titleDesc">Title Z-A</option>
-		    </select>
-		  </div>
-		</header>
-		<div class="flex-1 overflow-y-auto p-4">
-		  {#if filteredArticles.length === 0}
-		    <div class="bg-white dark:bg-gray-800 p-4 rounded shadow"><h3 class="font-bold text-lg mb-1">No articles</h3><p class="text-gray-600 dark:text-gray-400 text-sm">Add some feeds to see articles.</p></div>
-		  {:else}
-		    {#each filteredArticles as article, index}
-		      <div class="bg-white dark:bg-gray-800 p-4 rounded shadow mb-4 hover:shadow-md transition-all duration-300 overflow-hidden" class:expanded={isArticleExpanded(index)}>
-		        <div class="flex items-start gap-4" onclick={() => toggleArticle(index)} role="button" tabindex="0" onkeypress={(e) => e.key === 'Enter' && toggleArticle(index)}>
-		          {#if article.image}
-		            <img src={article.image} alt="" class="w-32 h-32 object-cover rounded flex-shrink-0" />
-		          {/if}
-		          <div class="flex-1">
-		            <h3 class="font-bold text-lg mb-1">
-		              <a href={article.link} target="_blank" rel="noopener noreferrer" class="hover:underline text-blue-600 dark:text-blue-400">{article.title}</a>
-		            </h3>
-		            <p class="text-gray-600 dark:text-gray-400 text-sm mb-2">{feeds.find(f => f.id === article.feedId)?.title || 'Unknown'} - {new Date(article.pubDate).toLocaleDateString()}</p>
-		            <div class="overflow-hidden transition-all duration-300 article-content" style="max-height: {isArticleExpanded(index) ? '2000px' : '4.5em'};">
-		              <div class="text-gray-700 dark:text-gray-300">{@html getDisplayContent(article, index)}</div>
-		            </div>
-		          </div>
-		          <div class="flex items-center gap-2 ml-4" role="presentation">
-		            <button onclick={() => toggleStarred(article.id!, article.starred)} class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">{article.starred ? '⭐' : '☆'}</button>
-		            {#if !article.read}<button onclick={() => markAsRead(article.id!)} class="px-2 py-1 text-xs bg-blue-600 text-white rounded">Mark read</button>{/if}
-		          </div>
-		        </div>
-		        <div class="text-center mt-2">
-		          <span class="text-xs text-gray-400">{isArticleExpanded(index) ? '▲ Click to collapse' : '▼ Click to read more'}</span>
-		        </div>
-		      </div>
-		    {/each}
-		    <!-- Load more trigger for infinite scroll -->
-		    <div bind:this={loadTrigger} class="h-4">
-		      {#if isLoadingMore}
-		        <p class="text-center text-gray-500 py-2">Loading more...</p>
-		      {:else if !hasMoreArticles && filteredArticles.length > 0}
-		        <p class="text-center text-gray-400 py-2">No more articles</p>
-		      {/if}
-		    </div>
-		  {/if}
-		</div>
+	<main class="flex-1 flex flex-col overflow-hidden">
+		<ReaderHeader
+			{currentTitle}
+			{sortBy}
+			bind:searchQuery
+			onRefresh={refreshFeeds}
+			onSortChange={handleSortChange}
+		/>
+		<ArticleList
+			articles={filteredArticles}
+			{feeds}
+			{isLoadingMore}
+			{hasMoreArticles}
+			{expandedIndices}
+			bind:loadTrigger
+			onToggleArticle={toggleArticle}
+			onToggleStarred={toggleStarred}
+			onMarkAsRead={markAsRead}
+			{getDisplayContent}
+		/>
 	</main>
 </div>
 
