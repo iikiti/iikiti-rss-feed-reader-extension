@@ -2,6 +2,7 @@
 	import type { Feed, Folder, View } from '$lib/db';
 	import type { SvelteSet } from 'svelte/reactivity';
 	import SidebarItem from './SidebarItem.svelte';
+	import Button from '$lib/components/Button.svelte';
 
 	type DragOverItem = { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null;
 
@@ -133,9 +134,9 @@
 	>
 		<span class="flex justify-between items-center">
 			<span>👁️ {view!.name}</span>
-			<span class="hidden group-hover:inline-flex gap-1">
-				<button onclick={onedit} class="text-blue-500 p-1" aria-label="Edit view">✏️</button>
-				<button onclick={ondelete} class="text-red-500 p-1" aria-label="Delete view">🗑️</button>
+			<span class="invisible group-hover:visible inline-flex gap-1">
+				<Button variant="primary" size="sm" onclick={onedit} ariaLabel="Edit view">✏️</Button>
+				<Button variant="danger" size="sm" onclick={ondelete} ariaLabel="Delete view">🗑️</Button>
 			</span>
 		</span>
 	</div>
@@ -154,17 +155,17 @@
 		<span class="flex justify-between items-center">
 			<span>📰 {feed!.title}</span>
 			<span class="flex items-center gap-2">
-				<span class="hidden group-hover:inline-flex gap-1">
-					<button
+				<span class="invisible group-hover:visible inline-flex gap-1">
+					<Button
+						variant="primary" size="sm"
 						onclick={(e) => { e.stopPropagation(); onedit?.(); }}
-						class="text-blue-500 p-1"
-						aria-label="Edit feed"
-					>✏️</button>
-					<button
+						ariaLabel="Edit feed"
+					>✏️</Button>
+					<Button
+						variant="danger" size="sm"
 						onclick={(e) => { e.stopPropagation(); ondelete?.(); }}
-						class="text-red-500 p-1"
-						aria-label="Delete feed"
-					>🗑️</button>
+						ariaLabel="Delete feed"
+					>🗑️</Button>
 				</span>
 				<span class="text-xs text-gray-500">
 					{feedCount!.unread}/{feedCount!.total}
@@ -196,17 +197,17 @@
 				<span>📁 {folder!.name}</span>
 			</span>
 			<span class="flex items-center gap-2">
-				<span class="hidden group-hover:inline-flex gap-1">
-					<button
+				<span class="invisible group-hover:visible inline-flex gap-1">
+					<Button
+						variant="primary" size="sm"
 						onclick={(e) => { e.stopPropagation(); onEditFolder?.(folder!); }}
-						class="text-blue-500 p-1"
-						aria-label="Edit folder"
-					>✏️</button>
-					<button
+						ariaLabel="Edit folder"
+					>✏️</Button>
+					<Button
+						variant="danger" size="sm"
 						onclick={(e) => { e.stopPropagation(); onDeleteFolder?.(folder!.id!); }}
-						class="text-red-500 p-1"
-						aria-label="Delete folder"
-					>🗑️</button>
+						ariaLabel="Delete folder"
+					>🗑️</Button>
 				</span>
 				<span class="text-xs text-gray-500">
 					{folderCount!.unread}/{folderCount!.total}
