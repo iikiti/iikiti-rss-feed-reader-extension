@@ -16,7 +16,7 @@ export interface Feed {
 	title: string;
 	folderId?: number;
 	order?: number;
-	lastFetched?: number;
+	lastFetched?: Date;
 	error?: string;
 	favicon?: string;
 }
