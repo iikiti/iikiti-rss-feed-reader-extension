@@ -154,9 +154,6 @@
 		<span class="flex justify-between items-center">
 			<span>📰 {feed!.title}</span>
 			<span class="flex items-center gap-2">
-				<span class="text-xs text-gray-500">
-					{feedCount!.unread}/{feedCount!.total}
-				</span>
 				<span class="hidden group-hover:inline-flex gap-1">
 					<button
 						onclick={(e) => { e.stopPropagation(); onedit?.(); }}
@@ -168,6 +165,9 @@
 						class="text-red-500 p-1"
 						aria-label="Delete feed"
 					>🗑️</button>
+				</span>
+				<span class="text-xs text-gray-500">
+					{feedCount!.unread}/{feedCount!.total}
 				</span>
 			</span>
 		</span>
@@ -196,9 +196,6 @@
 				<span>📁 {folder!.name}</span>
 			</span>
 			<span class="flex items-center gap-2">
-				<span class="text-xs text-gray-500">
-					{folderCount!.unread}/{folderCount!.total}
-				</span>
 				<span class="hidden group-hover:inline-flex gap-1">
 					<button
 						onclick={(e) => { e.stopPropagation(); onEditFolder?.(folder!); }}
@@ -210,6 +207,9 @@
 						class="text-red-500 p-1"
 						aria-label="Delete folder"
 					>🗑️</button>
+				</span>
+				<span class="text-xs text-gray-500">
+					{folderCount!.unread}/{folderCount!.total}
 				</span>
 			</span>
 		</span>
