@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
+import { initSettings, setUserSetting } from './settings';
 
 export type DarkModeOption = 'system' | 'dark' | 'light';
 
@@ -37,18 +38,23 @@ function applyMode(mode: DarkModeOption) {
 	}
 }
 
-export async function initDarkMode() {
+/**
+ * Initialize dark mode for a specific user.
+ * Loads settings via the per-user settings store.
+ */
+export async function initDarkMode(userId: number) {
 	if (!browser) return;
-	const result = await chrome.storage.local.get('darkMode') as { darkMode?: DarkModeOption };
-	const mode: DarkModeOption = result.darkMode ?? 'system';
-	darkMode.set(mode);
-	applyMode(mode);
+	const settings = await initSettings(userId);
+	darkMode.set(settings.darkMode);
+	applyMode(settings.darkMode);
 }
 
-export async function setDarkMode(mode: DarkModeOption) {
+/**
+ * Update dark mode for a specific user.
+ * Persists to the per-user settings store.
+ */
+export async function setDarkMode(userId: number, mode: DarkModeOption) {
 	darkMode.set(mode);
 	applyMode(mode);
-	if (browser) {
-		await chrome.storage.local.set({ darkMode: mode });
-	}
+	await setUserSetting(userId, 'darkMode', mode);
 }

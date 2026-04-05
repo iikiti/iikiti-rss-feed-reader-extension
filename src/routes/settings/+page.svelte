@@ -4,6 +4,7 @@
 	import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, deleteUser, renameUser, type User } from '$lib/db';
 	import Modal from '$lib/components/Modal.svelte';
 	import { darkMode, setDarkMode, type DarkModeOption } from '$lib/stores/darkMode';
+	import { allUserSettings, setUserSetting, getUserSettingsSnapshot } from '$lib/stores/settings';
 
 	let refreshInterval = 15;
 	let users: User[] = [];
@@ -16,11 +17,11 @@
 
 	onMount(async () => {
 		if (browser) {
-		  const result = await chrome.storage.local.get('refreshInterval') as { refreshInterval?: number };
-		  if (result.refreshInterval) {
-		    refreshInterval = result.refreshInterval;
-		  }
 		  await loadUsers();
+		  if (currentUserId !== null) {
+		    const settings = getUserSettingsSnapshot($allUserSettings, currentUserId);
+		    refreshInterval = settings.refreshInterval;
+		  }
 		  // Calculate IndexedDB storage usage
 		  try {
 		    if (navigator.storage && navigator.storage.estimate) {
@@ -44,11 +45,11 @@
 		currentUserId = await getCurrentUserId();
 	}
 
-	function updateRefreshInterval(event: Event) {
+	async function updateRefreshInterval(event: Event) {
 		const target = event.target as HTMLSelectElement;
 		refreshInterval = parseInt(target.value, 10);
-		if (browser) {
-		  chrome.storage.local.set({ refreshInterval });
+		if (browser && currentUserId !== null) {
+		  await setUserSetting(currentUserId, 'refreshInterval', refreshInterval);
 		}
 	}
 
@@ -171,7 +172,7 @@
 		    id="dark-mode-select"
 		    class="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
 		    value={$darkMode}
-		    on:change={(e) => setDarkMode((e.target as HTMLSelectElement).value as DarkModeOption)}
+		    on:change={(e) => currentUserId !== null && setDarkMode(currentUserId, (e.target as HTMLSelectElement).value as DarkModeOption)}
 		  >
 		    <option value="system">System</option>
 		    <option value="dark">Dark</option>
