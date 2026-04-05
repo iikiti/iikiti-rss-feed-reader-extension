@@ -1,7 +1,8 @@
-e<script lang="ts">
+<script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, deleteUser, renameUser, type User } from '$lib/db';
+	import Modal from '$lib/components/Modal.svelte';
 
 	let refreshInterval = 15;
 	let users: User[] = [];
@@ -13,13 +14,10 @@ e<script lang="ts">
 
 	onMount(async () => {
 		if (browser) {
-		  // Load settings
 		  const result = await chrome.storage.local.get('refreshInterval') as { refreshInterval?: number };
 		  if (result.refreshInterval) {
 		    refreshInterval = result.refreshInterval;
 		  }
-		  
-		  // Load users
 		  await loadUsers();
 		}
 	});
@@ -70,7 +68,6 @@ e<script lang="ts">
 	async function handleSwitchUser(userId: number) {
 		await setCurrentUserId(userId);
 		currentUserId = userId;
-		// Trigger a page refresh to reload data
 		if (browser) {
 		  window.location.reload();
 		}
@@ -92,7 +89,6 @@ e<script lang="ts">
 		  <h1 class="text-2xl font-bold">Settings</h1>
 		</div>
 		
-		<!-- User Management Section -->
 		<div class="mb-6">
 		  <h2 class="font-semibold mb-2">Users</h2>
 		  <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
@@ -161,26 +157,18 @@ e<script lang="ts">
 	</div>
 </div>
 
-{#if showUserModal}
-	<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" on:click|self={() => showUserModal = false} on:keydown={(e) => e.key === 'Escape' && (showUserModal = false)} role="dialog" aria-modal="true" tabindex="-1">
-		<form class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6" on:submit|preventDefault={handleCreateUser}>
-		  <div class="flex items-center justify-between mb-4">
-		    <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">Add User</h2>
-		    <button on:click={() => showUserModal = false} class="text-gray-500 hover:text-gray-700" aria-label="Close">✕</button>
-		  </div>
-		  <div class="space-y-4">
-		    <div>
-		      <label for="new-user-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">User Name</label>
-		      <input 
-		        id="new-user-name" 
-		        type="text" 
-		        bind:value={newUserName} 
-		        placeholder="Enter user name" 
-		        class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" 
-		      />
-		    </div>
-		    <button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded" type="submit">Create User</button>
-		  </div>
-		</form>
-	</div>
-{/if}
+<Modal title="Add User" open={showUserModal} on:close={() => showUserModal = false}>
+	<form on:submit|preventDefault={handleCreateUser} class="space-y-4">
+		<div>
+			<label for="new-user-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">User Name</label>
+			<input
+				id="new-user-name"
+				type="text"
+				bind:value={newUserName}
+				placeholder="Enter user name"
+				class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+			/>
+		</div>
+		<button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded" type="submit">Create User</button>
+	</form>
+</Modal>

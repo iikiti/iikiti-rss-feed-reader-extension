@@ -7,6 +7,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import ReaderHeader from '$lib/components/reader/ReaderHeader.svelte';
 import ReaderSidebar from '$lib/components/reader/ReaderSidebar.svelte';
 import ArticleList from '$lib/components/reader/ArticleList.svelte';
+import Modal from '$lib/components/Modal.svelte';
 
 let currentUserId: number | null = $state(null);
 let users: { id?: number; name: string; createdAt: number }[] = $state([]);
@@ -706,65 +707,85 @@ const totalCount = $derived(
 	</main>
 </div>
 
-{#if showAddModal}
-	<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={(e) => e.target === e.currentTarget && closeModal()} onkeydown={(e) => e.key === 'Escape' && closeModal()} role="dialog" aria-modal="true" tabindex="-1">
-		<form class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6">
-		  <div class="flex items-center justify-between mb-4">
-		    <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">
-		      {editingId ? (addMode === 'feed' ? 'Edit Feed' : addMode === 'folder' ? 'Edit Folder' : 'Edit View') : (addMode === 'feed' ? 'Add Feed' : addMode === 'folder' ? 'Add Folder' : 'Add View')}
-		    </h2>
-		    <button onclick={closeModal} class="text-gray-500 hover:text-gray-700" aria-label="Close">✕</button>
-		  </div>
-		  <div class="flex mb-4 border-b border-gray-200 dark:border-gray-700">
-		    <button class="flex-1 py-2 text-center {addMode === 'feed' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'feed'}>Feed</button>
-		    <button class="flex-1 py-2 text-center {addMode === 'folder' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'folder'}>Folder</button>
-		    <button class="flex-1 py-2 text-center {addMode === 'view' ? 'border-b-2 border-green-600 text-green-600' : 'text-gray-500'}" onclick={() => addMode = 'view'}>View</button>
-		  </div>
-		  
-		  {#if addMode === 'feed'}
-		    <div class="space-y-4">
-	<div>
-	<label for="feed-url" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed URL</label>
-	<input id="feed-url" type="url" bind:value={feedUrl} placeholder="https://example.com/feed.xml" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" />
+<Modal
+	title={editingId ? (addMode === 'feed' ? 'Edit Feed' : addMode === 'folder' ? 'Edit Folder' : 'Edit View') : (addMode === 'feed' ? 'Add Feed' : addMode === 'folder' ? 'Add Folder' : 'Add View')}
+	open={showAddModal}
+	on:close={closeModal}
+>
+	<div class="flex mb-4 border-b border-gray-200 dark:border-gray-700">
+		<button class="flex-1 py-2 text-center {addMode === 'feed' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'feed'}>Feed</button>
+		<button class="flex-1 py-2 text-center {addMode === 'folder' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'folder'}>Folder</button>
+		<button class="flex-1 py-2 text-center {addMode === 'view' ? 'border-b-2 border-green-600 text-green-600' : 'text-gray-500'}" onclick={() => addMode = 'view'}>View</button>
 	</div>
 
-	<div>
-	<label for="feed-title" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed Title</label>
-	<input id="feed-title" type="url" bind:value={feedTitle} placeholder="Feed title" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" />
-	</div>
-	
-	<div><label for="folder-select" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Folder (optional)</label>
-	<input id="folder-search" type="text" bind:value={folderSearchQuery} placeholder="Search..." class="w-full px-3 py-2 mb-2 border rounded bg-white dark:bg-gray-700" />
-	<div class="max-h-40 overflow-y-auto border rounded bg-white dark:bg-gray-700 p-2">
-	<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={null} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">No folder</span></label>
-	{#each filteredFolders as folder}<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600"><input type="radio" name="folder" value={folder.id} bind:group={feedFolderId} /><span class="text-gray-700 dark:text-gray-300">{folder.name}</span></label>{/each}
-	</div></div>
-	{#if feedError}<p class="text-red-500 text-sm">{feedError}</p>{/if}
-	<button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded disabled:opacity-50" onclick={addFeed} disabled={feedLoading}>{feedLoading ? 'Saving...' : (editingId ? 'Update Feed' : 'Add Feed')}</button>
-		    </div>
-		  {:else if addMode === 'folder'}
-		    <div class="space-y-4">
-		      <div><label for="folder-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Folder Name</label>
-		        <input id="folder-name" type="text" bind:value={folderName} placeholder="Enter folder name" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700" /></div>
-		      <div><label for="parent-folder" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Parent Folder (optional)</label>
-		        <select id="parent-folder" bind:value={folderParentId} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700">
-		          <option value={null}>No parent (root)</option>
-		          {#each availableParentFolders as f}<option value={f.id}>{f.name}</option>{/each}</select></div>
-		      {#if folderError}<p class="text-red-500 text-sm">{folderError}</p>{/if}
-		      <button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded" onclick={addFolder}>{editingId ? 'Update Folder' : 'Add Folder'}</button>
-		    </div>
-		  {:else}
-		    <div class="space-y-4">
-		      <div><label for="view-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">View Name</label>
-		        <input id="view-name" type="text" bind:value={viewName} placeholder="e.g., Unread" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700" /></div>
-		      <div><label for="view-read" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Filter: Read Status</label>
-		        <select id="view-read" bind:value={viewFilterRead} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700"><option value="all">All</option><option value="unread">Unread only</option><option value="read">Read only</option></select></div>
-		      <div><label for="view-starred" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Filter: Starred</label>
-		        <select id="view-starred" bind:value={viewFilterStarred} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700"><option value="all">All</option><option value="starred">Starred only</option></select></div>
-		      {#if viewError}<p class="text-red-500 text-sm">{viewError}</p>{/if}
-		      <button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded" onclick={addView}>{editingId ? 'Update View' : 'Add View'}</button>
-		    </div>
-		  {/if}
-		</form>
-	</div>
-{/if}
+	{#if addMode === 'feed'}
+		<div class="space-y-4">
+			<div>
+				<label for="feed-url" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed URL</label>
+				<input id="feed-url" type="url" bind:value={feedUrl} placeholder="https://example.com/feed.xml" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" />
+			</div>
+			<div>
+				<label for="feed-title" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Feed Title</label>
+				<input id="feed-title" type="text" bind:value={feedTitle} placeholder="Feed title" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100" />
+			</div>
+			<div>
+				<label for="folder-select" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Folder (optional)</label>
+				<input id="folder-search" type="text" bind:value={folderSearchQuery} placeholder="Search..." class="w-full px-3 py-2 mb-2 border rounded bg-white dark:bg-gray-700" />
+				<div class="max-h-40 overflow-y-auto border rounded bg-white dark:bg-gray-700 p-2">
+					<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600">
+						<input type="radio" name="folder" value={null} bind:group={feedFolderId} />
+						<span class="text-gray-700 dark:text-gray-300">No folder</span>
+					</label>
+					{#each filteredFolders as folder}
+						<label class="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-600">
+							<input type="radio" name="folder" value={folder.id} bind:group={feedFolderId} />
+							<span class="text-gray-700 dark:text-gray-300">{folder.name}</span>
+						</label>
+					{/each}
+				</div>
+			</div>
+			{#if feedError}<p class="text-red-500 text-sm">{feedError}</p>{/if}
+			<button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded disabled:opacity-50" onclick={addFeed} disabled={feedLoading}>{feedLoading ? 'Saving...' : (editingId ? 'Update Feed' : 'Add Feed')}</button>
+		</div>
+	{:else if addMode === 'folder'}
+		<div class="space-y-4">
+			<div>
+				<label for="folder-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Folder Name</label>
+				<input id="folder-name" type="text" bind:value={folderName} placeholder="Enter folder name" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700" />
+			</div>
+			<div>
+				<label for="parent-folder" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Parent Folder (optional)</label>
+				<select id="parent-folder" bind:value={folderParentId} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700">
+					<option value={null}>No parent (root)</option>
+					{#each availableParentFolders as f}<option value={f.id}>{f.name}</option>{/each}
+				</select>
+			</div>
+			{#if folderError}<p class="text-red-500 text-sm">{folderError}</p>{/if}
+			<button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded" onclick={addFolder}>{editingId ? 'Update Folder' : 'Add Folder'}</button>
+		</div>
+	{:else}
+		<div class="space-y-4">
+			<div>
+				<label for="view-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">View Name</label>
+				<input id="view-name" type="text" bind:value={viewName} placeholder="e.g., Unread" class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700" />
+			</div>
+			<div>
+				<label for="view-read" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Filter: Read Status</label>
+				<select id="view-read" bind:value={viewFilterRead} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700">
+					<option value="all">All</option>
+					<option value="unread">Unread only</option>
+					<option value="read">Read only</option>
+				</select>
+			</div>
+			<div>
+				<label for="view-starred" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Filter: Starred</label>
+				<select id="view-starred" bind:value={viewFilterStarred} class="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700">
+					<option value="all">All</option>
+					<option value="starred">Starred only</option>
+				</select>
+			</div>
+			{#if viewError}<p class="text-red-500 text-sm">{viewError}</p>{/if}
+			<button class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded" onclick={addView}>{editingId ? 'Update View' : 'Add View'}</button>
+		</div>
+	{/if}
+</Modal>
