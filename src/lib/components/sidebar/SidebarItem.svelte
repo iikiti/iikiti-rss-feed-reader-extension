@@ -10,12 +10,13 @@
 		// Type discriminator
 		type,
 
-		// View-specific
-		view,
+	// View-specific
+	view,
+	viewCount,
 
-		// Feed-specific
-		feed,
-		feedCount,
+	// Feed-specific
+	feed,
+	feedCount,
 
 		// Folder-specific
 		folder,
@@ -54,9 +55,10 @@
 		handleDrop,
 		handleDragEnd
 	}: {
-		type: 'view' | 'feed' | 'folder';
+	type: 'view' | 'feed' | 'folder';
 
-		view?: View;
+	view?: View;
+	viewCount?: { total: number; unread: number };
 
 		feed?: Feed;
 		feedCount?: { total: number; unread: number };
@@ -93,6 +95,9 @@
 		handleDrop?: (e: DragEvent, targetType: 'folder' | 'feed', targetId: number) => void;
 		handleDragEnd?: () => void;
 	} = $props();
+
+	// Hover state for showing edit/delete buttons on this specific item only
+	let isHovered = $state(false);
 
 	// Derived state shared across snippets
 	const paddingRem = $derived(0.5 + depth * 1);
@@ -131,12 +136,19 @@
 		role="button"
 		tabindex="0"
 		onkeypress={(e) => e.key === 'Enter' && onselect?.()}
+		onmouseenter={() => isHovered = true}
+		onmouseleave={() => isHovered = false}
 	>
 		<span class="flex justify-between items-center">
 			<span>👁️ {view!.name}</span>
-			<span class="invisible group-hover:visible inline-flex gap-1">
-				<Button variant="primary" size="sm" onclick={onedit} ariaLabel="Edit view">✏️</Button>
-				<Button variant="danger" size="sm" onclick={ondelete} ariaLabel="Delete view">🗑️</Button>
+			<span class="flex items-center gap-2">
+				<span class="{isHovered ? 'visible' : 'invisible'} inline-flex gap-1">
+					<Button variant="primary" size="sm" onclick={onedit} ariaLabel="Edit view">✏️</Button>
+					<Button variant="danger" size="sm" onclick={ondelete} ariaLabel="Delete view">🗑️</Button>
+				</span>
+				{#if viewCount}
+					<span class="text-xs text-gray-500">{viewCount.unread}/{viewCount.total}</span>
+				{/if}
 			</span>
 		</span>
 	</div>
@@ -151,22 +163,24 @@
 		role="button"
 		tabindex="0"
 		onkeypress={(e) => e.key === 'Enter' && onselect?.()}
+		onmouseenter={() => isHovered = true}
+		onmouseleave={() => isHovered = false}
 	>
 		<span class="flex justify-between items-center">
 			<span>📰 {feed!.title}</span>
 			<span class="flex items-center gap-2">
-				<span class="invisible group-hover:visible inline-flex gap-1">
-					<Button
-						variant="primary" size="sm"
-						onclick={(e) => { e.stopPropagation(); onedit?.(); }}
-						ariaLabel="Edit feed"
-					>✏️</Button>
-					<Button
-						variant="danger" size="sm"
-						onclick={(e) => { e.stopPropagation(); ondelete?.(); }}
-						ariaLabel="Delete feed"
-					>🗑️</Button>
-				</span>
+				<span class="{isHovered ? 'visible' : 'invisible'} inline-flex gap-1">
+				<Button
+					variant="primary" size="sm"
+					onclick={(e) => { e.stopPropagation(); onedit?.(); }}
+					ariaLabel="Edit feed"
+				>✏️</Button>
+				<Button
+					variant="danger" size="sm"
+					onclick={(e) => { e.stopPropagation(); ondelete?.(); }}
+					ariaLabel="Delete feed"
+				>🗑️</Button>
+			</span>
 				<span class="text-xs text-gray-500">
 					{feedCount!.unread}/{feedCount!.total}
 				</span>
@@ -184,6 +198,8 @@
 		role="button"
 		tabindex="0"
 		onkeypress={(e) => e.key === 'Enter' && onSelectFolder?.(folder!.id!)}
+		onmouseenter={() => isHovered = true}
+		onmouseleave={() => isHovered = false}
 	>
 		<span class="flex justify-between items-center">
 			<span class="flex items-center gap-1">
@@ -197,18 +213,18 @@
 				<span>📁 {folder!.name}</span>
 			</span>
 			<span class="flex items-center gap-2">
-				<span class="invisible group-hover:visible inline-flex gap-1">
-					<Button
-						variant="primary" size="sm"
-						onclick={(e) => { e.stopPropagation(); onEditFolder?.(folder!); }}
-						ariaLabel="Edit folder"
-					>✏️</Button>
-					<Button
-						variant="danger" size="sm"
-						onclick={(e) => { e.stopPropagation(); onDeleteFolder?.(folder!.id!); }}
-						ariaLabel="Delete folder"
-					>🗑️</Button>
-				</span>
+				<span class="{isHovered ? 'visible' : 'invisible'} inline-flex gap-1">
+				<Button
+					variant="primary" size="sm"
+					onclick={(e) => { e.stopPropagation(); onEditFolder?.(folder!); }}
+					ariaLabel="Edit folder"
+				>✏️</Button>
+				<Button
+					variant="danger" size="sm"
+					onclick={(e) => { e.stopPropagation(); onDeleteFolder?.(folder!.id!); }}
+					ariaLabel="Delete folder"
+				>🗑️</Button>
+			</span>
 				<span class="text-xs text-gray-500">
 					{folderCount!.unread}/{folderCount!.total}
 				</span>
@@ -271,13 +287,13 @@
 <!-- ─── Render ────────────────────────────────────────────────────────────── -->
 
 {#if type === 'view'}
-	<li class="group">
+	<li>
 		{@render viewContent()}
 	</li>
 
 {:else if type === 'feed'}
 	<li
-		class="group"
+		class=""
 		class:rounded-t={isOverFeed && dragOverItem?.position === 'above'}
 		class:rounded-b={isOverFeed && dragOverItem?.position === 'below'}
 		class:border-t-2={isOverFeed && dragOverItem?.position === 'above'}
@@ -296,7 +312,7 @@
 
 {:else if type === 'folder'}
 	<li
-		class="group"
+		class=""
 		class:rounded-t={isOverFolder && dragOverItem?.position === 'above'}
 		class:rounded-b={isOverFolder && dragOverItem?.position === 'below'}
 		class:border-t-2={isOverFolder && dragOverItem?.position === 'above'}

@@ -11,6 +11,7 @@
 	let newUserName = '';
 	let editingUserId: number | null = null;
 	let editUserName = '';
+	let dbUsage = 'Calculating...';
 
 	onMount(async () => {
 		if (browser) {
@@ -19,6 +20,21 @@
 		    refreshInterval = result.refreshInterval;
 		  }
 		  await loadUsers();
+		  // Calculate IndexedDB storage usage
+		  try {
+		    if (navigator.storage && navigator.storage.estimate) {
+		      const estimate = await navigator.storage.estimate();
+		      const used = estimate.usage ?? 0;
+		      const quota = estimate.quota ?? 0;
+		      const usedMB = (used / 1024 / 1024).toFixed(2);
+		      const quotaMB = (quota / 1024 / 1024).toFixed(0);
+		      dbUsage = `${usedMB} MB used of ${quotaMB} MB`;
+		    } else {
+		      dbUsage = 'Not available';
+		    }
+		  } catch {
+		    dbUsage = 'Unable to calculate';
+		  }
 		}
 	});
 
@@ -145,7 +161,7 @@
 		</div>
 		<div class="mb-4">
 		  <h2 class="font-semibold mb-2">Storage</h2>
-		  <p class="text-sm text-gray-600 dark:text-gray-400">IndexedDB Usage: <span id="db-usage">Calculating...</span></p>
+		  <p class="text-sm text-gray-600 dark:text-gray-400">IndexedDB Usage: <span>{dbUsage}</span></p>
 		</div>
 		<div class="mb-4">
 		  <h2 class="font-semibold mb-2">Preferences</h2>

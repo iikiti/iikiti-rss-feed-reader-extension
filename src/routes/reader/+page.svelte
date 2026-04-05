@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, getFeedArticleCounts, getFolderArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
+import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, getFeedArticleCounts, getFolderArticleCounts, getViewArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 import { SvelteSet } from 'svelte/reactivity';
 import ReaderHeader from '$lib/components/reader/ReaderHeader.svelte';
@@ -64,6 +64,7 @@ let expandedFolders = new SvelteSet<number>([]);
 // Feed and folder counts cache
 let feedCounts = $state<Record<number, { total: number; unread: number }>>({});
 let folderCounts = $state<Record<number, { total: number; unread: number }>>({});
+let viewCounts = $state<Record<number, { total: number; unread: number }>>({});
 
 // Drag and drop state
 let draggedItem: { type: 'folder' | 'feed'; id: number } | null = $state(null);
@@ -126,6 +127,15 @@ const availableParentFolders = $derived(
 		  }
 		}
 		folderCounts = newFolderCounts;
+
+		// Load view counts
+		const newViewCounts: Record<number, { total: number; unread: number }> = {};
+		for (const view of views) {
+		  if (view.id) {
+		    newViewCounts[view.id] = await getViewArticleCounts(currentUserId, view);
+		  }
+		}
+		viewCounts = newViewCounts;
 	}
 
 	// Sorted folders and feeds by order
@@ -656,6 +666,7 @@ const totalCount = $derived(
 		{views}
 		{feedCounts}
 		{folderCounts}
+		{viewCounts}
 		{expandedFolders}
 		{selectedFeedId}
 		{selectedFolderId}

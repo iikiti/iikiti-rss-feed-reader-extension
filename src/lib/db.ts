@@ -217,6 +217,24 @@ export async function getFolderArticleCounts(userId: number, folderId: number): 
 	return { total, unread };
 }
 
+// Get article counts for a specific view (filtered by its filterJson criteria)
+export async function getViewArticleCounts(userId: number, view: View): Promise<{ total: number; unread: number }> {
+	const filter = JSON.parse(view.filterJson) as { read?: string; starred?: string };
+	const total = await db.articles.where('userId').equals(userId).and(a => {
+		if (filter.read === 'unread' && a.read) return false;
+		if (filter.read === 'read' && !a.read) return false;
+		if (filter.starred === 'starred' && !a.starred) return false;
+		return true;
+	}).count();
+	const unread = await db.articles.where('userId').equals(userId).and(a => {
+		if (a.read) return false;
+		if (filter.read === 'read') return false;
+		if (filter.starred === 'starred' && !a.starred) return false;
+		return true;
+	}).count();
+	return { total, unread };
+}
+
 // Update feed order
 export async function updateFeedOrder(feedId: number, order: number): Promise<void> {
 	await db.feeds.update(feedId, { order });

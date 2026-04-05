@@ -13,6 +13,7 @@
 		views,
 		feedCounts,
 		folderCounts,
+		viewCounts,
 		expandedFolders,
 		selectedFeedId,
 		selectedFolderId,
@@ -45,8 +46,9 @@
 		feeds: Feed[];
 		folders: Folder[];
 		views: View[];
-		feedCounts: Record<number, { total: number; unread: number }>;
-		folderCounts: Record<number, { total: number; unread: number }>;
+	feedCounts: Record<number, { total: number; unread: number }>;
+	folderCounts: Record<number, { total: number; unread: number }>;
+	viewCounts: Record<number, { total: number; unread: number }>;
 		expandedFolders: SvelteSet<number>;
 		selectedFeedId: number | null;
 		selectedFolderId: number | null;
@@ -116,6 +118,7 @@
 				<SidebarItem
 					type="view"
 					{view}
+					viewCount={viewCounts[view.id!] || { total: 0, unread: 0 }}
 					selected={selectedViewId === view.id}
 					onselect={() => onSelectView(view.id!)}
 					onedit={() => onOpenAddModal('view', view)}
@@ -126,9 +129,9 @@
 
 		<div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
 		<ul>
-			<li class="group">
-				<div
-					class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}"
+		<li>
+			<div
+				class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}"
 					onclick={onSelectAllArticles}
 					role="button"
 					tabindex="0"
