@@ -3,6 +3,7 @@
 	import { browser } from '$app/environment';
 	import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, deleteUser, renameUser, type User } from '$lib/db';
 	import Modal from '$lib/components/Modal.svelte';
+	import { darkMode, setDarkMode, type DarkModeOption } from '$lib/stores/darkMode';
 
 	let refreshInterval = 15;
 	let users: User[] = [];
@@ -165,10 +166,17 @@
 		</div>
 		<div class="mb-4">
 		  <h2 class="font-semibold mb-2">Preferences</h2>
-		  <label class="flex items-center space-x-2">
-		    <input type="checkbox" class="form-checkbox text-blue-600">
-		    <span>Dark Mode (System Default)</span>
-		  </label>
+		  <label class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300" for="dark-mode-select">Dark Mode</label>
+		  <select
+		    id="dark-mode-select"
+		    class="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+		    value={$darkMode}
+		    on:change={(e) => setDarkMode((e.target as HTMLSelectElement).value as DarkModeOption)}
+		  >
+		    <option value="system">System</option>
+		    <option value="dark">Dark</option>
+		    <option value="light">Light</option>
+		  </select>
 		</div>
 	</div>
 </div>
