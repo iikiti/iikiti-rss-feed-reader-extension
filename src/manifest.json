@@ -46,7 +46,7 @@
 	],
 	"web_accessible_resources": [
 		{
-		  "resources": ["popup/index.html", "reader/index.html", "background.js", "content.js", "static/**/*"],
+		  "resources": ["popup/index.html", "reader/index.html", "static/**/*"],
 		  "matches": ["<all_urls>"]
 		}
 	]

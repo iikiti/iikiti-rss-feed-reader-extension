@@ -1,25 +1,28 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import type { Snippet } from 'svelte';
 
-	export let title: string = '';
-	export let open: boolean = false;
-
-	const dispatch = createEventDispatcher<{ close: void }>();
-
-	function close() {
-		dispatch('close');
-	}
+	let {
+		title = '',
+		open = false,
+		onclose,
+		children
+	}: {
+		title?: string;
+		open?: boolean;
+		onclose: () => void;
+		children: Snippet;
+	} = $props();
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') close();
+		if (e.key === 'Escape') onclose();
 	}
 </script>
 
 {#if open}
 	<div
 		class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-		on:click|self={close}
-		on:keydown={handleKeydown}
+		onclick={(e) => e.target === e.currentTarget && onclose()}
+		onkeydown={handleKeydown}
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="modal-title"
@@ -30,9 +33,9 @@
 				{#if title}
 					<h2 id="modal-title" class="text-xl font-bold text-gray-900 dark:text-gray-100">{title}</h2>
 				{/if}
-				<button on:click={close} class="ml-auto text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" aria-label="Close">✕</button>
+				<button onclick={onclose} class="ml-auto text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" aria-label="Close">✕</button>
 			</div>
-			<slot />
+			{@render children()}
 		</div>
 	</div>
 {/if}

@@ -383,11 +383,9 @@ const totalCount = $derived(
 		};
 	});
 	
-	// React to search query changes
+	// Reload data whenever the search query changes
 	$effect(() => {
-		// Track searchQuery dependency
-		const _ = searchQuery;
-		// Reload data when search changes
+		void searchQuery;
 		loadData();
 	});
 
@@ -522,7 +520,12 @@ const totalCount = $derived(
 		if (!feedUrl.trim()) { feedError = 'Please enter a feed URL'; return; }
 		feedLoading = true; feedError = '';
 		try {
-		  new URL(feedUrl);
+		  const parsed = new URL(feedUrl);
+		  if (!['http:', 'https:'].includes(parsed.protocol)) {
+		    feedError = 'Feed URL must use http or https';
+		    feedLoading = false;
+		    return;
+		  }
 		  if (editingId) {
 		    await db.feeds.update(editingId, { title: feedTitle, url: feedUrl, folderId: feedFolderId || undefined });
 		    closeModal(); await loadData();
@@ -613,9 +616,7 @@ const totalCount = $derived(
 		if (expandedIndices.has(index)) {
 			expandedIndices.delete(index);
 		} else {
-	expandedIndices.forEach((idx) => {
-	expandedIndices.delete(idx);
-	});
+			expandedIndices.clear();
 			expandedIndices.add(index);
 		}
 	}
@@ -721,7 +722,7 @@ const totalCount = $derived(
 <Modal
 	title={editingId ? (addMode === 'feed' ? 'Edit Feed' : addMode === 'folder' ? 'Edit Folder' : 'Edit View') : (addMode === 'feed' ? 'Add Feed' : addMode === 'folder' ? 'Add Folder' : 'Add View')}
 	open={showAddModal}
-	on:close={closeModal}
+	onclose={closeModal}
 >
 	<div class="flex mb-4 border-b border-gray-200 dark:border-gray-700">
 		<button class="flex-1 py-2 text-center {addMode === 'feed' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}" onclick={() => addMode = 'feed'}>Feed</button>

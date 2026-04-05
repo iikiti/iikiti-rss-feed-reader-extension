@@ -293,7 +293,6 @@
 
 {:else if type === 'feed'}
 	<li
-		class=""
 		class:rounded-t={isOverFeed && dragOverItem?.position === 'above'}
 		class:rounded-b={isOverFeed && dragOverItem?.position === 'below'}
 		class:border-t-2={isOverFeed && dragOverItem?.position === 'above'}
@@ -312,7 +311,6 @@
 
 {:else if type === 'folder'}
 	<li
-		class=""
 		class:rounded-t={isOverFolder && dragOverItem?.position === 'above'}
 		class:rounded-b={isOverFolder && dragOverItem?.position === 'below'}
 		class:border-t-2={isOverFolder && dragOverItem?.position === 'above'}

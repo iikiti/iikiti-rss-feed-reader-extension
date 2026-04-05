@@ -11,8 +11,6 @@
 	let currentUserId: number | null = null;
 	let showUserModal = false;
 	let newUserName = '';
-	let editingUserId: number | null = null;
-	let editUserName = '';
 	let dbUsage = 'Calculating...';
 
 	onMount(async () => {
@@ -92,7 +90,6 @@
 	}
 
 	function openAddUserModal() {
-		editingUserId = null;
 		newUserName = '';
 		showUserModal = true;
 	}
@@ -123,15 +120,15 @@
 		        </div>
 		        <div class="flex gap-2">
 		          {#if user.id !== currentUserId}
-		            <button on:click={() => handleSwitchUser(user.id!)} class="text-sm text-blue-600 hover:underline">Switch</button>
+		          <button onclick={() => handleSwitchUser(user.id!)} class="text-sm text-blue-600 hover:underline">Switch</button>
 		          {/if}
-		          <button on:click={() => handleRenameUser(user.id!)} class="text-sm text-gray-600 hover:underline">Rename</button>
-		          <button on:click={() => handleDeleteUser(user.id!)} class="text-sm text-red-600 hover:underline">Delete</button>
+		          <button onclick={() => handleRenameUser(user.id!)} class="text-sm text-gray-600 hover:underline">Rename</button>
+		          <button onclick={() => handleDeleteUser(user.id!)} class="text-sm text-red-600 hover:underline">Delete</button>
 		        </div>
 		      </div>
 		    {/each}
 		  </div>
-		  <button on:click={openAddUserModal} class="mt-3 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">+ Add User</button>
+		  <button onclick={openAddUserModal} class="mt-3 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">+ Add User</button>
 		</div>
 		
 		<div class="mb-6">
@@ -143,7 +140,7 @@
 		    <select 
 		      id="refresh-interval"
 		      value={refreshInterval}
-		      on:change={updateRefreshInterval}
+		      onchange={updateRefreshInterval}
 		      class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
 		    >
 		      {#each Array(60) as _, i}
@@ -172,7 +169,7 @@
 		    id="dark-mode-select"
 		    class="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
 		    value={$darkMode}
-		    on:change={(e) => currentUserId !== null && setDarkMode(currentUserId, (e.target as HTMLSelectElement).value as DarkModeOption)}
+		    onchange={(e) => currentUserId !== null && setDarkMode(currentUserId, (e.target as HTMLSelectElement).value as DarkModeOption)}
 		  >
 		    <option value="system">System</option>
 		    <option value="dark">Dark</option>
@@ -182,8 +179,8 @@
 	</div>
 </div>
 
-<Modal title="Add User" open={showUserModal} on:close={() => showUserModal = false}>
-	<form on:submit|preventDefault={handleCreateUser} class="space-y-4">
+<Modal title="Add User" open={showUserModal} onclose={() => showUserModal = false}>
+	<form onsubmit={(e) => { e.preventDefault(); handleCreateUser(); }} class="space-y-4">
 		<div>
 			<label for="new-user-name" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">User Name</label>
 			<input

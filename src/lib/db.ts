@@ -249,29 +249,22 @@ export async function updateFolderOrder(folderId: number, order: number): Promis
 export type SortOption = 'pubDateDesc' | 'pubDateAsc' | 'titleAsc' | 'titleDesc';
 
 export async function getUserArticlesSorted(userId: number, sortBy: SortOption = 'pubDateDesc'): Promise<Article[]> {
-	// Use Table directly to enable orderBy, then filter by userId using .and()
+	// Filter in the Dexie collection using .filter() before materialising to avoid
+	// loading other users' articles into JS memory.
 	const table = db.articles;
-	let collection: Article[];
-	
+
 	switch (sortBy) {
 		case 'pubDateDesc':
-		  collection = await table.orderBy('pubDate').reverse().toArray();
-		  break;
+			return table.orderBy('pubDate').reverse().filter(a => a.userId === userId).toArray();
 		case 'pubDateAsc':
-		  collection = await table.orderBy('pubDate').toArray();
-		  break;
+			return table.orderBy('pubDate').filter(a => a.userId === userId).toArray();
 		case 'titleAsc':
-		  collection = await table.orderBy('title').toArray();
-		  break;
+			return table.orderBy('title').filter(a => a.userId === userId).toArray();
 		case 'titleDesc':
-		  collection = await table.orderBy('title').reverse().toArray();
-		  break;
+			return table.orderBy('title').reverse().filter(a => a.userId === userId).toArray();
 		default:
-		  collection = await table.orderBy('pubDate').reverse().toArray();
+			return table.orderBy('pubDate').reverse().filter(a => a.userId === userId).toArray();
 	}
-	
-	// Filter by userId after sorting (Dexie doesn't support compound queries well with indexes)
-	return collection.filter(article => article.userId === userId);
 }
 
 // Get paginated articles with optional filtering
@@ -404,7 +397,6 @@ export async function searchArticles(
 	if (options.starred !== undefined) {
 		articles = articles.filter(a => a.starred === options.starred);
 	}
-	console.log(searchTerms);
 	// Filter by search terms in indexed fields
 	const matchingArticles = articles.filter(article => {
 		const searchableFields = [

@@ -6,14 +6,18 @@ export interface ParsedFeed {
 /**
  * Decodes XML/HTML encoded characters in a string.
  * Handles entities like &lt;, &gt;, &amp;, &quot;, &apos;, and numeric character references.
+ * Uses regex replacements instead of DOM manipulation so it works in service worker context.
  */
 export function decodeHtmlEntities(text: string): string {
 	if (!text) return text;
-	
-	// Use a textarea element to decode HTML entities
-	const textarea = document.createElement('textarea');
-	textarea.innerHTML = text;
-	return textarea.value;
+	return text
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(parseInt(dec, 10)))
+		.replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 }
 
 /**
@@ -62,25 +66,20 @@ export async function fetchAndParseFeed(url: string): Promise<ParsedFeed> {
 	const text = await response.text();
 	const feed = parseFeed(text);
 
-	// Extract images and site content for items in a single fetch
+	// Extract images and site content for all items concurrently
 	const itemsWithData = await Promise.all(
-	feed.items.map(async (item) => {
-	// Only fetch if we need image or site content
-	if (item.link) {
-	const extracted = await extractImageAndSiteContent(item.link);
-	if (extracted.image || extracted.siteContent) {
-	console.log(`Data successfully acquired for ${item.link}`);
-	return { ...item, ...extracted };
-	}
-	}
-	return item;
-	})
+		feed.items.map(async (item) => {
+			if (item.link) {
+				const extracted = await extractImageAndSiteContent(item.link);
+				if (extracted.image || extracted.siteContent) {
+					return { ...item, ...extracted };
+				}
+			}
+			return item;
+		})
 	);
 
-	return {
-	...feed,
-	items: itemsWithData
-	};
+	return { ...feed, items: itemsWithData };
 }
 
 interface ExtractedData {
