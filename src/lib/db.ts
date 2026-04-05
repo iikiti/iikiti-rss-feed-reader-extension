@@ -32,7 +32,7 @@ export interface Article {
 	siteContent?: string; // Content fetched from the actual article page
 	snippet: string;
 	pubDate: number;
-	read: boolean; // 0 = unread, 1 = read
+	read: boolean;
 	starred: boolean;
 	author?: string;
 	image?: string;
@@ -77,14 +77,14 @@ export class IikitiDB extends Dexie {
 		// Version 6: Added siteContent field to articles
 		// Version 7: Added full-text search index fields
 		// Version 8: Added order field to folders and feeds
-		this.version(8).stores({
-		  users: '++id, &name',
-		  feeds: '++id, userId, &url, folderId, [userId+order]',
-		  articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title',
-		  folders: '++id, userId, [userId+name], parentId, [userId+order]',
-		  views: '++id, userId, &name'
-		}).upgrade(tx => {
-		  return Promise.resolve();
+		// Version 9: Added compound indexes [userId+pubDate] and [userId+title] for efficient
+		//             per-user sorted pagination without loading all rows into memory
+		this.version(9).stores({
+			users: '++id, &name',
+			feeds: '++id, userId, &url, folderId, [userId+order]',
+			articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title, [userId+pubDate], [userId+title]',
+			folders: '++id, userId, [userId+name], parentId, [userId+order]',
+			views: '++id, userId, &name'
 		});
 	}
 }
@@ -99,15 +99,15 @@ export async function getCurrentUserId(): Promise<number> {
 		const user = await db.users.get(result.currentUserId);
 		if (user) return result.currentUserId;
 	}
-	
+
 	// Get or create default user
-	let users = await db.users.toArray();
+	const users = await db.users.toArray();
 	if (users.length === 0) {
 		const userId = await db.users.add({ name: 'Default User', createdAt: Date.now() });
 		await chrome.storage.local.set({ currentUserId: userId });
 		return userId as number;
 	}
-	
+
 	// Set the first user as current
 	await chrome.storage.local.set({ currentUserId: users[0].id });
 	return users[0].id!;
@@ -133,17 +133,17 @@ export async function deleteUser(userId: number): Promise<void> {
 	await db.folders.where('userId').equals(userId).delete();
 	await db.views.where('userId').equals(userId).delete();
 	await db.users.delete(userId);
-	
+
 	// If this was the current user, switch to another user
 	const result = await chrome.storage.local.get('currentUserId') as { currentUserId?: number };
 	if (result.currentUserId === userId) {
 		const remainingUsers = await db.users.toArray();
 		if (remainingUsers.length > 0) {
-		  await chrome.storage.local.set({ currentUserId: remainingUsers[0].id });
+			await chrome.storage.local.set({ currentUserId: remainingUsers[0].id });
 		} else {
-		  // Create a new default user if all users deleted
-		  const newUserId = await db.users.add({ name: 'Default User', createdAt: Date.now() });
-		  await chrome.storage.local.set({ currentUserId: newUserId });
+			// Create a new default user if all users deleted
+			const newUserId = await db.users.add({ name: 'Default User', createdAt: Date.now() });
+			await chrome.storage.local.set({ currentUserId: newUserId });
 		}
 	}
 }
@@ -169,72 +169,6 @@ export async function getUserArticles(userId: number): Promise<Article[]> {
 	return db.articles.where('userId').equals(userId).toArray();
 }
 
-// Get total article counts for a user (without pagination limits)
-export async function getUserArticleCounts(userId: number): Promise<{ total: number; unread: number }> {
-	const total = await db.articles.where('userId').equals(userId).count();
-	const unread = await db.articles.where('userId').equals(userId).and(a => !a.read).count();
-	return { total, unread };
-}
-
-// Get article counts for a specific feed
-export async function getFeedArticleCounts(userId: number, feedId: number): Promise<{ total: number; unread: number }> {
-	const total = await db.articles.where('userId').equals(userId).and(a => a.feedId === feedId).count();
-	const unread = await db.articles.where('userId').equals(userId).and(a => a.feedId === feedId && !a.read).count();
-	return { total, unread };
-}
-
-// Get article counts for a specific folder (including all feeds in subfolders)
-export async function getFolderArticleCounts(userId: number, folderId: number): Promise<{ total: number; unread: number }> {
-	// Get feeds directly in this folder
-	const feedsInFolder = await db.feeds.where('userId').equals(userId).and(f => f.folderId === folderId).toArray();
-	const feedIds = feedsInFolder.map(f => f.id!);
-	
-	// Get all child folder IDs recursively
-	const getChildFolderIds = async (parentId: number): Promise<number[]> => {
-		const childFolders = await db.folders.where('parentId').equals(parentId).toArray();
-		const childIds = childFolders.map(f => f.id!);
-		const nestedIds: number[] = [];
-		for (const id of childIds) {
-		  nestedIds.push(...await getChildFolderIds(id));
-		}
-		return [...childIds, ...nestedIds];
-	};
-	
-	const childFolderIds = await getChildFolderIds(folderId);
-	
-	// Get feeds from child folders
-	for (const childId of childFolderIds) {
-		const childFeeds = await db.feeds.where('userId').equals(userId).and(f => f.folderId === childId).toArray();
-		feedIds.push(...childFeeds.map(f => f.id!));
-	}
-	
-	if (feedIds.length === 0) {
-		return { total: 0, unread: 0 };
-	}
-	
-	const total = await db.articles.where('userId').equals(userId).and(a => feedIds.includes(a.feedId)).count();
-	const unread = await db.articles.where('userId').equals(userId).and(a => feedIds.includes(a.feedId) && !a.read).count();
-	return { total, unread };
-}
-
-// Get article counts for a specific view (filtered by its filterJson criteria)
-export async function getViewArticleCounts(userId: number, view: View): Promise<{ total: number; unread: number }> {
-	const filter = JSON.parse(view.filterJson) as { read?: string; starred?: string };
-	const total = await db.articles.where('userId').equals(userId).and(a => {
-		if (filter.read === 'unread' && a.read) return false;
-		if (filter.read === 'read' && !a.read) return false;
-		if (filter.starred === 'starred' && !a.starred) return false;
-		return true;
-	}).count();
-	const unread = await db.articles.where('userId').equals(userId).and(a => {
-		if (a.read) return false;
-		if (filter.read === 'read') return false;
-		if (filter.starred === 'starred' && !a.starred) return false;
-		return true;
-	}).count();
-	return { total, unread };
-}
-
 // Update feed order
 export async function updateFeedOrder(feedId: number, order: number): Promise<void> {
 	await db.feeds.update(feedId, { order });
@@ -249,25 +183,26 @@ export async function updateFolderOrder(folderId: number, order: number): Promis
 export type SortOption = 'pubDateDesc' | 'pubDateAsc' | 'titleAsc' | 'titleDesc';
 
 export async function getUserArticlesSorted(userId: number, sortBy: SortOption = 'pubDateDesc'): Promise<Article[]> {
-	// Filter in the Dexie collection using .filter() before materialising to avoid
-	// loading other users' articles into JS memory.
-	const table = db.articles;
-
+	// Use compound index to avoid loading all articles and filtering in JS
 	switch (sortBy) {
 		case 'pubDateDesc':
-			return table.orderBy('pubDate').reverse().filter(a => a.userId === userId).toArray();
+			return db.articles.where('[userId+pubDate]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).reverse().toArray();
 		case 'pubDateAsc':
-			return table.orderBy('pubDate').filter(a => a.userId === userId).toArray();
+			return db.articles.where('[userId+pubDate]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).toArray();
 		case 'titleAsc':
-			return table.orderBy('title').filter(a => a.userId === userId).toArray();
+			return db.articles.where('[userId+title]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).toArray();
 		case 'titleDesc':
-			return table.orderBy('title').reverse().filter(a => a.userId === userId).toArray();
+			return db.articles.where('[userId+title]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).reverse().toArray();
 		default:
-			return table.orderBy('pubDate').reverse().filter(a => a.userId === userId).toArray();
+			return db.articles.where('[userId+pubDate]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).reverse().toArray();
 	}
 }
 
-// Get paginated articles with optional filtering
+// Get paginated articles with optional filtering.
+// For the unfiltered case (no feedId/folderId/read/starred) the compound index
+// [userId+pubDate] / [userId+title] is used for DB-level sorting and pagination,
+// which avoids loading the entire article set into memory.
+// When filters are present the data is loaded for that user and filtered in JS.
 export async function getPaginatedArticles(
 	userId: number,
 	options: {
@@ -282,29 +217,63 @@ export async function getPaginatedArticles(
 ): Promise<{ articles: Article[]; hasMore: boolean }> {
 	const limit = options.limit ?? 25;
 	const offset = options.offset ?? 0;
-	
-	// Get all user articles
+	const sortBy = options.sortBy ?? 'pubDateDesc';
+
+	const hasFilters =
+		options.feedId !== undefined ||
+		options.folderId !== undefined ||
+		options.read !== undefined ||
+		options.starred !== undefined;
+
+	// ── Fast path: no extra filters ─────────────────────────────────────────
+	// Use the compound index for true DB-level sorted pagination.
+	if (!hasFilters) {
+		const isDateSort = sortBy === 'pubDateDesc' || sortBy === 'pubDateAsc';
+		const indexName = isDateSort ? '[userId+pubDate]' : '[userId+title]';
+		const isDesc = sortBy === 'pubDateDesc' || sortBy === 'titleDesc';
+
+		let coll = db.articles
+			.where(indexName)
+			.between([userId, Dexie.minKey], [userId, Dexie.maxKey]);
+		if (isDesc) coll = coll.reverse();
+
+		const [articles, totalCount] = await Promise.all([
+			coll.offset(offset).limit(limit).toArray(),
+			db.articles.where('userId').equals(userId).count(),
+		]);
+
+		return { articles, hasMore: offset + limit < totalCount };
+	}
+
+	// ── Filtered path ────────────────────────────────────────────────────────
+	// Load only this user's articles then apply filters in JS.
 	let articles = await db.articles.where('userId').equals(userId).toArray();
-	
-	// Apply filters
+
 	if (options.feedId !== undefined) {
 		articles = articles.filter(a => a.feedId === options.feedId);
 	}
 	if (options.folderId !== undefined) {
-		// Get feed IDs in folder
 		const feedsInFolder = await db.feeds.where('userId').equals(userId).toArray();
-		const folderFeedIds = feedsInFolder.filter(f => f.folderId === options.folderId).map(f => f.id!);
-		// Get child folder feed IDs recursively
-		const childFolders = await db.folders.where('userId').equals(userId).toArray();
 		const getChildFolderIds = (parentId: number): number[] => {
-		  const childIds = childFolders.filter(f => f.parentId === parentId).map(f => f.id!);
-		  return [...childIds, ...childIds.flatMap(id => getChildFolderIds(id))];
+			const childIds = feedsInFolder
+				.filter(f => f.folderId === parentId)
+				.map(f => f.id!);
+			// re-use feedsInFolder as a proxy; actual folder recursion is below
+			const childFolders = feedsInFolder; // unused — see below
+			void childFolders;
+			return childIds;
 		};
-		const childFolderIds = getChildFolderIds(options.folderId);
-		const allFolderFeedIds = [...folderFeedIds, ...feedsInFolder
-		  .filter(f => childFolderIds.includes(f.folderId!))
-		  .map(f => f.id!)];
-		articles = articles.filter(a => allFolderFeedIds.includes(a.feedId));
+		// Collect all folder IDs in the subtree
+		const allFolders = await db.folders.where('userId').equals(userId).toArray();
+		const getAllDescendantFolderIds = (parentId: number): number[] => {
+			const children = allFolders.filter(f => f.parentId === parentId).map(f => f.id!);
+			return [...children, ...children.flatMap(id => getAllDescendantFolderIds(id))];
+		};
+		const folderIds = [options.folderId, ...getAllDescendantFolderIds(options.folderId)];
+		const folderFeedIds = feedsInFolder
+			.filter(f => f.folderId !== undefined && folderIds.includes(f.folderId))
+			.map(f => f.id!);
+		articles = articles.filter(a => folderFeedIds.includes(a.feedId));
 	}
 	if (options.read !== undefined) {
 		articles = articles.filter(a => a.read === options.read);
@@ -312,33 +281,24 @@ export async function getPaginatedArticles(
 	if (options.starred !== undefined) {
 		articles = articles.filter(a => a.starred === options.starred);
 	}
-	
+
 	// Sort
-	const sortBy = options.sortBy ?? 'pubDateDesc';
 	articles.sort((a, b) => {
 		switch (sortBy) {
-		  case 'pubDateDesc':
-		    return (b.pubDate || 0) - (a.pubDate || 0);
-		  case 'pubDateAsc':
-		    return (a.pubDate || 0) - (b.pubDate || 0);
-		  case 'titleAsc':
-		    return (a.title || '').localeCompare(b.title || '');
-		  case 'titleDesc':
-		    return (b.title || '').localeCompare(a.title || '');
-		  default:
-		    return (b.pubDate || 0) - (a.pubDate || 0);
+			case 'pubDateDesc': return (b.pubDate || 0) - (a.pubDate || 0);
+			case 'pubDateAsc':  return (a.pubDate || 0) - (b.pubDate || 0);
+			case 'titleAsc':    return (a.title || '').localeCompare(b.title || '');
+			case 'titleDesc':   return (b.title || '').localeCompare(a.title || '');
+			default:            return (b.pubDate || 0) - (a.pubDate || 0);
 		}
 	});
-	
+
 	const hasMore = articles.length > offset + limit;
-	return {
-		articles: articles.slice(offset, offset + limit),
-		hasMore
-	};
+	return { articles: articles.slice(offset, offset + limit), hasMore };
 }
 
-// Full-text search function that searches indexed fields
-// Segments the search query into words and ngrams and matches against indexed arrays
+// Full-text search function that searches indexed fields.
+// Segments the query into words and n-grams and matches against indexed arrays.
 export async function searchArticles(
 	userId: number,
 	query: string,
@@ -352,42 +312,33 @@ export async function searchArticles(
 ): Promise<Article[]> {
 	const limit = options.limit ?? 25;
 	const offset = options.offset ?? 0;
-	
+
 	if (!query || !query.trim()) {
-		// If no query, return filtered articles with pagination
-		let collection = db.articles.where('userId').equals(userId);
-		
-		if (options.feedId !== undefined) {
-		  collection = collection.and(a => a.feedId === options.feedId);
-		}
-		if (options.read !== undefined) {
-		  collection = collection.and(a => a.read === options.read);
-		}
-		if (options.starred !== undefined) {
-		  collection = collection.and(a => a.starred === options.starred);
-		}
-		
-		// Apply ordering by pubDate descending and pagination
-		const articles = await collection.toArray();
-		// Sort and paginate in memory (Dexie doesn't support offset well)
-		return articles
-		  .sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0))
-		  .slice(offset, offset + limit);
+		// No query — use compound index for sorted, paginated results
+		let coll = db.articles
+			.where('[userId+pubDate]')
+			.between([userId, Dexie.minKey], [userId, Dexie.maxKey])
+			.reverse();
+
+		if (options.feedId !== undefined) coll = coll.and(a => a.feedId === options.feedId);
+		if (options.read !== undefined)   coll = coll.and(a => a.read === options.read);
+		if (options.starred !== undefined) coll = coll.and(a => a.starred === options.starred);
+
+		return coll.offset(offset).limit(limit).toArray();
 	}
-	
-	// Segment query into words and ngrams
+
+	// Segment query into words and n-grams
 	const words = segmentWords(query);
 	const ngrams = generateAllNgrams(words, 3);
-	const searchTerms = [...new Set([...words, ...ngrams])]; // Dedupe
-	
+	const searchTerms = [...new Set([...words, ...ngrams])]; // dedupe
+
 	if (searchTerms.length === 0) {
 		return [];
 	}
-	
-	// Get all user articles and filter in memory
+
+	// Load all user articles and filter by search terms in memory (FTS requires a full scan)
 	let articles = await db.articles.where('userId').equals(userId).toArray();
-	
-	// Apply additional filters
+
 	if (options.feedId !== undefined) {
 		articles = articles.filter(a => a.feedId === options.feedId);
 	}
@@ -397,24 +348,115 @@ export async function searchArticles(
 	if (options.starred !== undefined) {
 		articles = articles.filter(a => a.starred === options.starred);
 	}
-	// Filter by search terms in indexed fields
+
 	const matchingArticles = articles.filter(article => {
 		const searchableFields = [
-		  ...(article.titleWords || []),
-		  ...(article.snippetWords || []),
-		  ...(article.siteContentWords || []),
-		  ...(article.titleNgrams || []),
-		  ...(article.snippetNgrams || []),
-		  ...(article.siteContentNgrams || [])
+			...(article.titleWords || []),
+			...(article.snippetWords || []),
+			...(article.siteContentWords || []),
+			...(article.titleNgrams || []),
+			...(article.snippetNgrams || []),
+			...(article.siteContentNgrams || [])
 		];
-		
-		return searchTerms.some(term => 
-		  searchableFields.some(field => field.includes(term))
+		return searchTerms.some(term =>
+			searchableFields.some(field => field.includes(term))
 		);
 	});
-	
-	// Sort by pubDate descending and paginate
+
 	return matchingArticles
 		.sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0))
 		.slice(offset, offset + limit);
+}
+
+// ── Batch count helpers ──────────────────────────────────────────────────────
+//
+// getAllArticleCounts replaces the previous pattern of firing O(feeds + folders + views)
+// individual DB queries in loadFeedAndFolderCounts().  It loads articles once and
+// computes all counts in a single JS pass.
+
+export interface ArticleCounts {
+	total: number;
+	unread: number;
+}
+
+export async function getAllArticleCounts(
+	userId: number,
+	feeds: Feed[],
+	folders: Folder[],
+	views: View[]
+): Promise<{
+	feedCounts: Record<number, ArticleCounts>;
+	folderCounts: Record<number, ArticleCounts>;
+	viewCounts: Record<number, ArticleCounts>;
+	totalCounts: ArticleCounts;
+}> {
+	// Single DB fetch: only this user's articles
+	const articles = await db.articles.where('userId').equals(userId).toArray();
+
+	// ── Feed counts — O(articles) ────────────────────────────────────────────
+	const feedCounts: Record<number, ArticleCounts> = {};
+	let totalUnread = 0;
+
+	for (const article of articles) {
+		const c = (feedCounts[article.feedId] ??= { total: 0, unread: 0 });
+		c.total++;
+		if (!article.read) { c.unread++; totalUnread++; }
+	}
+
+	const totalCounts: ArticleCounts = { total: articles.length, unread: totalUnread };
+
+	// ── Folder counts — recursive, but fully in-memory ───────────────────────
+	// Build parent → children map for the folder tree
+	const folderChildren: Record<number, number[]> = {};
+	for (const folder of folders) {
+		if (folder.parentId !== undefined && folder.id !== undefined) {
+			(folderChildren[folder.parentId] ??= []).push(folder.id);
+		}
+	}
+
+	function computeFolderCounts(folderId: number): ArticleCounts {
+		const counts: ArticleCounts = { total: 0, unread: 0 };
+
+		// Sum direct feeds
+		for (const feed of feeds) {
+			if (feed.folderId === folderId && feed.id !== undefined) {
+				const fc = feedCounts[feed.id];
+				if (fc) { counts.total += fc.total; counts.unread += fc.unread; }
+			}
+		}
+
+		// Sum child folders
+		for (const childId of folderChildren[folderId] ?? []) {
+			const cc = computeFolderCounts(childId);
+			counts.total += cc.total;
+			counts.unread += cc.unread;
+		}
+
+		return counts;
+	}
+
+	const folderCounts: Record<number, ArticleCounts> = {};
+	for (const folder of folders) {
+		if (folder.id !== undefined) {
+			folderCounts[folder.id] = computeFolderCounts(folder.id);
+		}
+	}
+
+	// ── View counts ──────────────────────────────────────────────────────────
+	const viewCounts: Record<number, ArticleCounts> = {};
+	for (const view of views) {
+		if (view.id === undefined) continue;
+		const filter = JSON.parse(view.filterJson) as { read?: string; starred?: string };
+		let total = 0, unread = 0;
+		for (const article of articles) {
+			if (filter.read === 'unread' && article.read) continue;
+			if (filter.read === 'read' && !article.read) continue;
+			if (filter.starred === 'starred' && !article.starred) continue;
+			total++;
+			if (!article.read) unread++;
+		}
+		viewCounts[view.id] = { total, unread };
+	}
+
+	return { feedCounts, folderCounts, viewCounts, totalCounts };
 }

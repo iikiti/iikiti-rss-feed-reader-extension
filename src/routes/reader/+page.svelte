@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getUserArticleCounts, getFeedArticleCounts, getFolderArticleCounts, getViewArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
+import { db, type Feed, type Folder, type View, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getUserArticlesSorted, searchArticles, getPaginatedArticles, getAllArticleCounts, type ArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
 import { SvelteSet } from 'svelte/reactivity';
 import ReaderHeader from '$lib/components/reader/ReaderHeader.svelte';
@@ -62,9 +62,9 @@ let totalArticleCounts = $state({ total: 0, unread: 0 });
 let expandedFolders = new SvelteSet<number>([]);
 
 // Feed and folder counts cache
-let feedCounts = $state<Record<number, { total: number; unread: number }>>({});
-let folderCounts = $state<Record<number, { total: number; unread: number }>>({});
-let viewCounts = $state<Record<number, { total: number; unread: number }>>({});
+let feedCounts = $state<Record<number, ArticleCounts>>({});
+let folderCounts = $state<Record<number, ArticleCounts>>({});
+let viewCounts = $state<Record<number, ArticleCounts>>({});
 
 // Drag and drop state
 let draggedItem: { type: 'folder' | 'feed'; id: number } | null = $state(null);
@@ -107,35 +107,17 @@ const availableParentFolders = $derived(
 		return expandedFolders.has(folderId);
 	}
 
-	async function loadFeedAndFolderCounts() {
+	// Replaces the previous O(feeds + folders + views) sequential query loop with a
+	// single getAllArticleCounts call that loads articles once and computes all counts
+	// in a single JS pass.
+	async function loadAllCounts() {
 		if (!currentUserId) return;
-		
-		// Load feed counts
-		const newFeedCounts: Record<number, { total: number; unread: number }> = {};
-		for (const feed of feeds) {
-		  if (feed.id) {
-		    newFeedCounts[feed.id] = await getFeedArticleCounts(currentUserId, feed.id);
-		  }
-		}
-		feedCounts = newFeedCounts;
-		
-		// Load folder counts
-		const newFolderCounts: Record<number, { total: number; unread: number }> = {};
-		for (const folder of folders) {
-		  if (folder.id) {
-		    newFolderCounts[folder.id] = await getFolderArticleCounts(currentUserId, folder.id);
-		  }
-		}
-		folderCounts = newFolderCounts;
-
-		// Load view counts
-		const newViewCounts: Record<number, { total: number; unread: number }> = {};
-		for (const view of views) {
-		  if (view.id) {
-		    newViewCounts[view.id] = await getViewArticleCounts(currentUserId, view);
-		  }
-		}
-		viewCounts = newViewCounts;
+		const { feedCounts: fc, folderCounts: flc, viewCounts: vc, totalCounts } =
+			await getAllArticleCounts(currentUserId, feeds, folders, views);
+		feedCounts = fc;
+		folderCounts = flc;
+		viewCounts = vc;
+		totalArticleCounts = totalCounts;
 	}
 
 	// Sorted folders and feeds by order
@@ -280,9 +262,8 @@ const availableParentFolders = $derived(
 		  }
 		}
 
-		// Reload data
+		// Reload data (includes counts via loadAllCounts)
 		await loadData();
-		await loadFeedAndFolderCounts();
 		draggedItem = null;
 	}
 
@@ -419,11 +400,8 @@ const totalCount = $derived(
 		folders = await db.folders.where('userId').equals(currentUserId).toArray();
 		views = await db.views.where('userId').equals(currentUserId).toArray();
 		
-		// Load total article counts (unpaginated)
-		totalArticleCounts = await getUserArticleCounts(currentUserId);
-		
-		// Load feed and folder counts
-		await loadFeedAndFolderCounts();
+		// Single-pass count computation for all feeds, folders, views, and totals
+		await loadAllCounts();
 		
 		// Reset pagination and load first 25 articles
 		articleOffset = 0;

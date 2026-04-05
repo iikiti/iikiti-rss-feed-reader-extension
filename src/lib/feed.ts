@@ -61,24 +61,51 @@ export interface ParsedItem {
 	image?: string;
 }
 
+/**
+ * Runs an array of async task factories with a maximum concurrency of `limit`.
+ * Preserves result order matching the input array.
+ */
+async function withConcurrencyLimit<T>(
+	tasks: Array<() => Promise<T>>,
+	limit: number
+): Promise<T[]> {
+	const results: T[] = new Array(tasks.length);
+	let next = 0;
+
+	async function runWorker(): Promise<void> {
+		while (next < tasks.length) {
+			const i = next++;
+			results[i] = await tasks[i]();
+		}
+	}
+
+	// Spin up at most `limit` workers; each drains the shared task queue
+	await Promise.all(
+		Array.from({ length: Math.min(limit, tasks.length) }, runWorker)
+	);
+	return results;
+}
+
+/** Maximum simultaneous article-page fetches when parsing a feed. */
+const ARTICLE_FETCH_CONCURRENCY = 3;
+
 export async function fetchAndParseFeed(url: string): Promise<ParsedFeed> {
 	const response = await fetch(url);
 	const text = await response.text();
 	const feed = parseFeed(text);
 
-	// Extract images and site content for all items concurrently
-	const itemsWithData = await Promise.all(
-		feed.items.map(async (item) => {
-			if (item.link) {
-				const extracted = await extractImageAndSiteContent(item.link);
-				if (extracted.image || extracted.siteContent) {
-					return { ...item, ...extracted };
-				}
+	// Fetch article pages with a concurrency limit to avoid flooding the network
+	const tasks = feed.items.map((item) => async () => {
+		if (item.link) {
+			const extracted = await extractImageAndSiteContent(item.link);
+			if (extracted.image || extracted.siteContent) {
+				return { ...item, ...extracted };
 			}
-			return item;
-		})
-	);
+		}
+		return item;
+	});
 
+	const itemsWithData = await withConcurrencyLimit(tasks, ARTICLE_FETCH_CONCURRENCY);
 	return { ...feed, items: itemsWithData };
 }
 
