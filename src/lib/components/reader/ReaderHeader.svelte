@@ -1,19 +1,19 @@
 <script lang="ts">
-	import type { SortOption } from '$lib/db';
+import type { SortOption } from '$lib/db';
 
-	let {
-		currentTitle,
-		sortBy,
-		searchQuery = $bindable(),
-		onRefresh,
-		onSortChange
-	}: {
-		currentTitle: string;
-		sortBy: SortOption;
-		searchQuery: string;
-		onRefresh: () => void;
-		onSortChange: (e: Event) => void;
-	} = $props();
+let {
+	currentTitle,
+	sortBy,
+	searchQuery = $bindable(),
+	onRefresh,
+	onSortChange
+}: {
+	currentTitle: string;
+	sortBy: SortOption;
+	searchQuery: string;
+	onRefresh: () => void;
+	onSortChange: (e: Event) => void;
+} = $props();
 </script>
 
 <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">

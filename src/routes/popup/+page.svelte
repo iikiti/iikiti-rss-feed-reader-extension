@@ -1,28 +1,28 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
-	import { getCurrentUserId, db, getAllUsers } from '$lib/db';
+import { onMount } from 'svelte';
+import { browser } from '$app/environment';
+import { getCurrentUserId, db, getAllUsers } from '$lib/db';
 
-	let unreadCount = 0;
-	let currentUserName = 'Loading...';
-	let users: { id?: number; name: string }[] = [];
+let unreadCount = 0;
+let currentUserName = 'Loading...';
+let users: { id?: number; name: string }[] = [];
 
-	onMount(async () => {
-		if (browser) {
-		  await loadData();
-		}
-	});
-
-	async function loadData() {
-		const userId = await getCurrentUserId();
-		users = await getAllUsers();
-		const user = users.find(u => u.id === userId);
-		currentUserName = user?.name || 'Unknown User';
-		
-		// Get unread count for current user
-		const articles = await db.articles.where('userId').equals(userId).and(a => !a.read).toArray();
-		unreadCount = articles.length;
+onMount(async () => {
+	if (browser) {
+		await loadData();
 	}
+});
+
+async function loadData() {
+	const userId = await getCurrentUserId();
+	users = await getAllUsers();
+	const user = users.find(u => u.id === userId);
+	currentUserName = user?.name || 'Unknown User';
+	
+	// Get unread count for current user
+	const articles = await db.articles.where('userId').equals(userId).and(a => !a.read).toArray();
+	unreadCount = articles.length;
+}
 </script>
 
 <div class="p-4 w-full min-h-full h-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">

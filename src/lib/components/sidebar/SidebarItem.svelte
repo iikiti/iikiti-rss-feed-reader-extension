@@ -1,129 +1,129 @@
 <script lang="ts">
-	import type { Feed, Folder, View } from '$lib/db';
-	import type { SvelteSet } from 'svelte/reactivity';
-	import SidebarItem from './SidebarItem.svelte';
-	import Button from '$lib/components/Button.svelte';
+import type { Feed, Folder, View } from '$lib/db';
+import type { SvelteSet } from 'svelte/reactivity';
+import SidebarItem from './SidebarItem.svelte';
+import Button from '$lib/components/Button.svelte';
 
-	type DragOverItem = { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null;
+type DragOverItem = { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null;
 
-	let {
-		// Type discriminator
-		type,
+let {
+	// Type discriminator
+	type,
 
-	// View-specific
-	view,
-	viewCount,
+// View-specific
+view,
+viewCount,
 
-	// Feed-specific
-	feed,
-	feedCount,
+// Feed-specific
+feed,
+feedCount,
 
-		// Folder-specific
-		folder,
-		folderCount,
-		allFolders,
-		allFeeds,
-		feedCounts,
-		folderCounts,
-		expandedFolders,
-		selectedFeedId,
-		selectedFolderId,
+	// Folder-specific
+	folder,
+	folderCount,
+	allFolders,
+	allFeeds,
+	feedCounts,
+	folderCounts,
+	expandedFolders,
+	selectedFeedId,
+	selectedFolderId,
 
-		// Shared
-		selected = false,
-		depth = 0,
-		dragOverItem = null,
+	// Shared
+	selected = false,
+	depth = 0,
+	dragOverItem = null,
 
-		// View/feed/folder simple callbacks
-		onselect,
-		onedit,
-		ondelete,
+	// View/feed/folder simple callbacks
+	onselect,
+	onedit,
+	ondelete,
 
-		// Folder-specific callbacks
-		onSelectFolder,
-		onSelectFeed,
-		onEditFolder,
-		onDeleteFolder,
-		onEditFeed,
-		onDeleteFeed,
-		toggleFolderExpand,
+	// Folder-specific callbacks
+	onSelectFolder,
+	onSelectFeed,
+	onEditFolder,
+	onDeleteFolder,
+	onEditFeed,
+	onDeleteFeed,
+	toggleFolderExpand,
 
-		// Drag handlers (feed & folder)
-		handleDragStart,
-		handleDragOver,
-		handleDragLeave,
-		handleDrop,
-		handleDragEnd
-	}: {
-	type: 'view' | 'feed' | 'folder';
+	// Drag handlers (feed & folder)
+	handleDragStart,
+	handleDragOver,
+	handleDragLeave,
+	handleDrop,
+	handleDragEnd
+}: {
+type: 'view' | 'feed' | 'folder';
 
-	view?: View;
-	viewCount?: { total: number; unread: number };
+view?: View;
+viewCount?: { total: number; unread: number };
 
-		feed?: Feed;
-		feedCount?: { total: number; unread: number };
+	feed?: Feed;
+	feedCount?: { total: number; unread: number };
 
-		folder?: Folder;
-		folderCount?: { total: number; unread: number };
-		allFolders?: Folder[];
-		allFeeds?: Feed[];
-		feedCounts?: Record<number, { total: number; unread: number }>;
-		folderCounts?: Record<number, { total: number; unread: number }>;
-		expandedFolders?: SvelteSet<number>;
-		selectedFeedId?: number | null;
-		selectedFolderId?: number | null;
+	folder?: Folder;
+	folderCount?: { total: number; unread: number };
+	allFolders?: Folder[];
+	allFeeds?: Feed[];
+	feedCounts?: Record<number, { total: number; unread: number }>;
+	folderCounts?: Record<number, { total: number; unread: number }>;
+	expandedFolders?: SvelteSet<number>;
+	selectedFeedId?: number | null;
+	selectedFolderId?: number | null;
 
-		selected?: boolean;
-		depth?: number;
-		dragOverItem?: DragOverItem;
+	selected?: boolean;
+	depth?: number;
+	dragOverItem?: DragOverItem;
 
-		onselect?: () => void;
-		onedit?: () => void;
-		ondelete?: () => void;
+	onselect?: () => void;
+	onedit?: () => void;
+	ondelete?: () => void;
 
-		onSelectFolder?: (id: number) => void;
-		onSelectFeed?: (id: number) => void;
-		onEditFolder?: (folder: Folder) => void;
-		onDeleteFolder?: (id: number) => void;
-		onEditFeed?: (feed: Feed) => void;
-		onDeleteFeed?: (id: number) => void;
-		toggleFolderExpand?: (id: number) => void;
+	onSelectFolder?: (id: number) => void;
+	onSelectFeed?: (id: number) => void;
+	onEditFolder?: (folder: Folder) => void;
+	onDeleteFolder?: (id: number) => void;
+	onEditFeed?: (feed: Feed) => void;
+	onDeleteFeed?: (id: number) => void;
+	toggleFolderExpand?: (id: number) => void;
 
-		handleDragStart?: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
-		handleDragOver?: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
-		handleDragLeave?: (e: DragEvent) => void;
-		handleDrop?: (e: DragEvent, targetType: 'folder' | 'feed', targetId: number) => void;
-		handleDragEnd?: () => void;
-	} = $props();
+	handleDragStart?: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
+	handleDragOver?: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
+	handleDragLeave?: (e: DragEvent) => void;
+	handleDrop?: (e: DragEvent, targetType: 'folder' | 'feed', targetId: number) => void;
+	handleDragEnd?: () => void;
+} = $props();
 
-	// Hover state for showing edit/delete buttons on this specific item only
-	let isHovered = $state(false);
+// Hover state for showing edit/delete buttons on this specific item only
+let isHovered = $state(false);
 
-	// Derived state shared across snippets
-	const paddingRem = $derived(0.5 + depth * 1);
-	const isExpanded = $derived(type === 'folder' && !!expandedFolders?.has(folder!.id!));
+// Derived state shared across snippets
+const paddingRem = $derived(0.5 + depth * 1);
+const isExpanded = $derived(type === 'folder' && !!expandedFolders?.has(folder!.id!));
 
-	const isOverFeed = $derived(
-		type === 'feed' && dragOverItem?.type === 'feed' && dragOverItem?.id === feed!.id
-	);
-	const isOverFolder = $derived(
-		type === 'folder' && dragOverItem?.type === 'folder' && dragOverItem?.id === folder!.id
-	);
+const isOverFeed = $derived(
+	type === 'feed' && dragOverItem?.type === 'feed' && dragOverItem?.id === feed!.id
+);
+const isOverFolder = $derived(
+	type === 'folder' && dragOverItem?.type === 'folder' && dragOverItem?.id === folder!.id
+);
 
-	const childFolders = $derived(
-		type === 'folder'
-			? [...(allFolders ?? []).filter(f => f.parentId === folder!.id)].sort(
-					(a, b) => (a.order ?? 0) - (b.order ?? 0)
-			  )
-			: []
-	);
-	const folderFeeds = $derived(
-		type === 'folder'
-			? [...(allFeeds ?? []).filter(f => f.folderId === folder!.id)].sort(
-					(a, b) => (a.order ?? 0) - (b.order ?? 0)
-			  )
-			: []
-	);
+const childFolders = $derived(
+	type === 'folder'
+		? [...(allFolders ?? []).filter(f => f.parentId === folder!.id)].sort(
+				(a, b) => (a.order ?? 0) - (b.order ?? 0)
+			)
+		: []
+);
+const folderFeeds = $derived(
+	type === 'folder'
+		? [...(allFeeds ?? []).filter(f => f.folderId === folder!.id)].sort(
+				(a, b) => (a.order ?? 0) - (b.order ?? 0)
+			)
+		: []
+);
 </script>
 
 <!-- ─── Snippets ──────────────────────────────────────────────────────────── -->

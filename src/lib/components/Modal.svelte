@@ -1,21 +1,21 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+import type { Snippet } from 'svelte';
 
-	let {
-		title = '',
-		open = false,
-		onclose,
-		children
-	}: {
-		title?: string;
-		open?: boolean;
-		onclose: () => void;
-		children: Snippet;
-	} = $props();
+let {
+	title = '',
+	open = false,
+	onclose,
+	children
+}: {
+	title?: string;
+	open?: boolean;
+	onclose: () => void;
+	children: Snippet;
+} = $props();
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') onclose();
-	}
+function handleKeydown(e: KeyboardEvent) {
+	if (e.key === 'Escape') onclose();
+}
 </script>
 
 {#if open}

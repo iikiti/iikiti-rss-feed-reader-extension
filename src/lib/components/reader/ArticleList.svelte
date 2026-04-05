@@ -1,34 +1,34 @@
 <script lang="ts">
-	import type { Article, Feed } from '$lib/db';
-	import type { SvelteSet } from 'svelte/reactivity';
+import type { Article, Feed } from '$lib/db';
+import type { SvelteSet } from 'svelte/reactivity';
 
-	let {
-		articles,
-		feeds,
-		isLoadingMore,
-		hasMoreArticles,
-		expandedIndices,
-		loadTrigger = $bindable(),
-		onToggleArticle,
-		onToggleStarred,
-		onMarkAsRead,
-		getDisplayContent
-	}: {
-		articles: Article[];
-		feeds: Feed[];
-		isLoadingMore: boolean;
-		hasMoreArticles: boolean;
-		expandedIndices: SvelteSet<number>;
-		loadTrigger: HTMLDivElement | null;
-		onToggleArticle: (index: number) => void;
-		onToggleStarred: (id: number, current: boolean) => void;
-		onMarkAsRead: (id: number) => void;
-		getDisplayContent: (article: Article, index: number) => string;
-	} = $props();
+let {
+	articles,
+	feeds,
+	isLoadingMore,
+	hasMoreArticles,
+	expandedIndices,
+	loadTrigger = $bindable(),
+	onToggleArticle,
+	onToggleStarred,
+	onMarkAsRead,
+	getDisplayContent
+}: {
+	articles: Article[];
+	feeds: Feed[];
+	isLoadingMore: boolean;
+	hasMoreArticles: boolean;
+	expandedIndices: SvelteSet<number>;
+	loadTrigger: HTMLDivElement | null;
+	onToggleArticle: (index: number) => void;
+	onToggleStarred: (id: number, current: boolean) => void;
+	onMarkAsRead: (id: number) => void;
+	getDisplayContent: (article: Article, index: number) => string;
+} = $props();
 
-	function isExpanded(index: number): boolean {
-		return expandedIndices.has(index);
-	}
+function isExpanded(index: number): boolean {
+	return expandedIndices.has(index);
+}
 </script>
 
 <div class="flex-1 overflow-y-auto p-4">

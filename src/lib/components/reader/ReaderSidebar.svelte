@@ -1,81 +1,81 @@
 <script lang="ts">
-	import type { Feed, Folder, View, SortOption } from '$lib/db';
-	import type { SvelteSet } from 'svelte/reactivity';
-	import SidebarItem from '$lib/components/sidebar/SidebarItem.svelte';
+import type { Feed, Folder, View, SortOption } from '$lib/db';
+import type { SvelteSet } from 'svelte/reactivity';
+import SidebarItem from '$lib/components/sidebar/SidebarItem.svelte';
 
-	type DragOverItem = { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null;
+type DragOverItem = { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null;
 
-	let {
-		currentUserId,
-		users,
-		feeds,
-		folders,
-		views,
-		feedCounts,
-		folderCounts,
-		viewCounts,
-		expandedFolders,
-		selectedFeedId,
-		selectedFolderId,
-		selectedViewId,
-		unreadCount,
-		totalCount,
-		dragOverItem,
-		sortedRootFolders,
-		sortedUnfolderedFeeds,
-		onSwitchUser,
-		onOpenAddModal,
-		onSelectAllArticles,
-		onSelectView,
-		onSelectFolder,
-		onSelectFeed,
-		onDeleteView,
-		onDeleteFolder,
-		onDeleteFeed,
-		onEditFolder,
-		onEditFeed,
-		toggleFolderExpand,
-		handleDragStart,
-		handleDragOver,
-		handleDragLeave,
-		handleDrop,
-		handleDragEnd
-	}: {
-		currentUserId: number | null;
-		users: { id?: number; name: string; createdAt: number }[];
-		feeds: Feed[];
-		folders: Folder[];
-		views: View[];
-	feedCounts: Record<number, { total: number; unread: number }>;
-	folderCounts: Record<number, { total: number; unread: number }>;
-	viewCounts: Record<number, { total: number; unread: number }>;
-		expandedFolders: SvelteSet<number>;
-		selectedFeedId: number | null;
-		selectedFolderId: number | null;
-		selectedViewId: number | null;
-		unreadCount: number;
-		totalCount: number;
-		dragOverItem: DragOverItem;
-		sortedRootFolders: Folder[];
-		sortedUnfolderedFeeds: Feed[];
-		onSwitchUser: (id: number) => void;
-		onOpenAddModal: (mode: 'feed' | 'folder' | 'view', item?: Feed | Folder | View) => void;
-		onSelectAllArticles: () => void;
-		onSelectView: (id: number) => void;
-		onSelectFolder: (id: number) => void;
-		onSelectFeed: (id: number) => void;
-		onDeleteView: (id: number) => void;
-		onDeleteFolder: (id: number) => void;
-		onDeleteFeed: (id: number) => void;
-		onEditFolder: (f: Folder) => void;
-		onEditFeed: (f: Feed) => void;
-		toggleFolderExpand: (id: number) => void;
-		handleDragStart: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
-		handleDragOver: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
-		handleDragLeave: (e: DragEvent) => void;
-		handleDrop: (e: DragEvent, targetType: 'folder' | 'feed', targetId: number) => void;
-		handleDragEnd: () => void;
-	} = $props();
+let {
+	currentUserId,
+	users,
+	feeds,
+	folders,
+	views,
+	feedCounts,
+	folderCounts,
+	viewCounts,
+	expandedFolders,
+	selectedFeedId,
+	selectedFolderId,
+	selectedViewId,
+	unreadCount,
+	totalCount,
+	dragOverItem,
+	sortedRootFolders,
+	sortedUnfolderedFeeds,
+	onSwitchUser,
+	onOpenAddModal,
+	onSelectAllArticles,
+	onSelectView,
+	onSelectFolder,
+	onSelectFeed,
+	onDeleteView,
+	onDeleteFolder,
+	onDeleteFeed,
+	onEditFolder,
+	onEditFeed,
+	toggleFolderExpand,
+	handleDragStart,
+	handleDragOver,
+	handleDragLeave,
+	handleDrop,
+	handleDragEnd
+}: {
+	currentUserId: number | null;
+	users: { id?: number; name: string; createdAt: number }[];
+	feeds: Feed[];
+	folders: Folder[];
+	views: View[];
+feedCounts: Record<number, { total: number; unread: number }>;
+folderCounts: Record<number, { total: number; unread: number }>;
+viewCounts: Record<number, { total: number; unread: number }>;
+	expandedFolders: SvelteSet<number>;
+	selectedFeedId: number | null;
+	selectedFolderId: number | null;
+	selectedViewId: number | null;
+	unreadCount: number;
+	totalCount: number;
+	dragOverItem: DragOverItem;
+	sortedRootFolders: Folder[];
+	sortedUnfolderedFeeds: Feed[];
+	onSwitchUser: (id: number) => void;
+	onOpenAddModal: (mode: 'feed' | 'folder' | 'view', item?: Feed | Folder | View) => void;
+	onSelectAllArticles: () => void;
+	onSelectView: (id: number) => void;
+	onSelectFolder: (id: number) => void;
+	onSelectFeed: (id: number) => void;
+	onDeleteView: (id: number) => void;
+	onDeleteFolder: (id: number) => void;
+	onDeleteFeed: (id: number) => void;
+	onEditFolder: (f: Folder) => void;
+	onEditFeed: (f: Feed) => void;
+	toggleFolderExpand: (id: number) => void;
+	handleDragStart: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
+	handleDragOver: (e: DragEvent, type: 'folder' | 'feed', id: number) => void;
+	handleDragLeave: (e: DragEvent) => void;
+	handleDrop: (e: DragEvent, targetType: 'folder' | 'feed', targetId: number) => void;
+	handleDragEnd: () => void;
+} = $props();
 </script>
 
 <aside class="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">

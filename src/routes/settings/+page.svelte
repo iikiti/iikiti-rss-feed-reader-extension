@@ -1,242 +1,242 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
-	import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, deleteUser, renameUser, type User, type Feed, type Folder } from '$lib/db';
-	import Modal from '$lib/components/Modal.svelte';
-	import { darkMode, setDarkMode, type DarkModeOption } from '$lib/stores/darkMode';
-	import { allUserSettings, setUserSetting, getUserSettingsSnapshot } from '$lib/stores/settings';
+import { onMount } from 'svelte';
+import { browser } from '$app/environment';
+import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, deleteUser, renameUser, type User, type Feed, type Folder } from '$lib/db';
+import Modal from '$lib/components/Modal.svelte';
+import { darkMode, setDarkMode, type DarkModeOption } from '$lib/stores/darkMode';
+import { allUserSettings, setUserSetting, getUserSettingsSnapshot } from '$lib/stores/settings';
 
-	let refreshInterval = 15;
-	let users: User[] = [];
-	let feeds: Feed[] = [];
-	let folders: Folder[] = [];
-	let currentUserId: number | null = null;
-	let showUserModal = false;
-	let newUserName = '';
-	let dbUsage = 'Calculating...';
-	let opmlImportError = '';
+let refreshInterval = 15;
+let users: User[] = [];
+let feeds: Feed[] = [];
+let folders: Folder[] = [];
+let currentUserId: number | null = null;
+let showUserModal = false;
+let newUserName = '';
+let dbUsage = 'Calculating...';
+let opmlImportError = '';
 
-	// Hidden file input for OPML import
-	let fileInput: HTMLInputElement | null = null;
+// Hidden file input for OPML import
+let fileInput: HTMLInputElement | null = null;
 
-	onMount(async () => {
-		if (browser) {
-			await loadData();
-			if (currentUserId !== null) {
-				const settings = getUserSettingsSnapshot($allUserSettings, currentUserId);
-				refreshInterval = settings.refreshInterval;
-			}
-			// Calculate IndexedDB storage usage
-			try {
-				if (navigator.storage && navigator.storage.estimate) {
-					const estimate = await navigator.storage.estimate();
-					const used = estimate.usage ?? 0;
-					const quota = estimate.quota ?? 0;
-					const usedMB = (used / 1024 / 1024).toFixed(2);
-					const quotaMB = (quota / 1024 / 1024).toFixed(0);
-					dbUsage = `${usedMB} MB used of ${quotaMB} MB`;
-				} else {
-					dbUsage = 'Not available';
-				}
-			} catch {
-				dbUsage = 'Unable to calculate';
-			}
-		}
-	});
-
-	async function loadData() {
-		users = await getAllUsers();
-		currentUserId = await getCurrentUserId();
+onMount(async () => {
+	if (browser) {
+		await loadData();
 		if (currentUserId !== null) {
-			feeds = await db.feeds.where('userId').equals(currentUserId).toArray();
-			folders = await db.folders.where('userId').equals(currentUserId).toArray();
+			const settings = getUserSettingsSnapshot($allUserSettings, currentUserId);
+			refreshInterval = settings.refreshInterval;
 		}
-	}
-
-	async function updateRefreshInterval(event: Event) {
-		const target = event.target as HTMLSelectElement;
-		refreshInterval = parseInt(target.value, 10);
-		if (browser && currentUserId !== null) {
-			await setUserSetting(currentUserId, 'refreshInterval', refreshInterval);
-		}
-	}
-
-	async function handleCreateUser() {
-		if (!newUserName.trim()) return;
-		await createUser(newUserName.trim());
-		newUserName = '';
-		showUserModal = false;
-		await loadData();
-	}
-
-	async function handleDeleteUser(userId: number) {
-		if (users.length <= 1) {
-			alert('Cannot delete the last user. At least one user is required.');
-			return;
-		}
-		if (confirm('Are you sure you want to delete this user? All their feeds, articles, and settings will be permanently deleted.')) {
-			await deleteUser(userId);
-			await loadData();
-		}
-	}
-
-	async function handleRenameUser(userId: number) {
-		const user = users.find(u => u.id === userId);
-		if (!user) return;
-
-		const newName = prompt('Enter new name:', user.name);
-		if (newName && newName.trim() && newName.trim() !== user.name) {
-			await renameUser(userId, newName.trim());
-			await loadData();
-		}
-	}
-
-	async function handleSwitchUser(userId: number) {
-		await setCurrentUserId(userId);
-		currentUserId = userId;
-		if (browser) {
-			window.location.reload();
-		}
-	}
-
-	function openAddUserModal() {
-		newUserName = '';
-		showUserModal = true;
-	}
-
-	// ── OPML Export ──────────────────────────────────────────────────────────
-
-	function escapeXml(str: string): string {
-		return str
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;');
-	}
-
-	function handleExportOPML() {
-		const lines: string[] = [
-			'<?xml version="1.0" encoding="UTF-8"?>',
-			'<opml version="2.0">',
-			'  <head>',
-			`    <title>${escapeXml('iikiti Feeds')}</title>`,
-			'  </head>',
-			'  <body>',
-		];
-
-		// Render folder subtree recursively, starting from root (parentId === undefined)
-		function renderOutlines(parentFolderId: number | undefined, indent: string) {
-			// Child folders at this level
-			for (const folder of folders.filter(f => f.parentId === parentFolderId)) {
-				lines.push(`${indent}<outline text="${escapeXml(folder.name)}" title="${escapeXml(folder.name)}">`);
-				renderOutlines(folder.id, indent + '  ');
-				lines.push(`${indent}</outline>`);
-			}
-			// Feeds at this level
-			for (const feed of feeds.filter(f => f.folderId === parentFolderId)) {
-				lines.push(
-					`${indent}<outline type="rss" text="${escapeXml(feed.title)}" title="${escapeXml(feed.title)}" xmlUrl="${escapeXml(feed.url)}"/>`
-				);
-			}
-		}
-
-		renderOutlines(undefined, '    ');
-
-		lines.push('  </body>', '</opml>');
-
-		const blob = new Blob([lines.join('\n')], { type: 'text/xml' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = 'iikiti-feeds.opml';
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-	}
-
-	// ── OPML Import ──────────────────────────────────────────────────────────
-
-	function triggerImportPicker() {
-		opmlImportError = '';
-		fileInput?.click();
-	}
-
-	async function handleImportFileSelected(event: Event) {
-		const input = event.target as HTMLInputElement;
-		const file = input.files?.[0];
-		if (!file || currentUserId === null) return;
-
-		// Reset so the same file can be re-selected if needed
-		input.value = '';
-
+		// Calculate IndexedDB storage usage
 		try {
-			await importOPML(file, currentUserId);
-		} catch (err) {
-			opmlImportError = err instanceof Error ? err.message : String(err);
+			if (navigator.storage && navigator.storage.estimate) {
+				const estimate = await navigator.storage.estimate();
+				const used = estimate.usage ?? 0;
+				const quota = estimate.quota ?? 0;
+				const usedMB = (used / 1024 / 1024).toFixed(2);
+				const quotaMB = (quota / 1024 / 1024).toFixed(0);
+				dbUsage = `${usedMB} MB used of ${quotaMB} MB`;
+			} else {
+				dbUsage = 'Not available';
+			}
+		} catch {
+			dbUsage = 'Unable to calculate';
 		}
 	}
+});
 
-	async function importOPML(file: File, userId: number) {
-		const text = await file.text();
-		const parser = new DOMParser();
-		const doc = parser.parseFromString(text, 'text/xml');
+async function loadData() {
+	users = await getAllUsers();
+	currentUserId = await getCurrentUserId();
+	if (currentUserId !== null) {
+		feeds = await db.feeds.where('userId').equals(currentUserId).toArray();
+		folders = await db.folders.where('userId').equals(currentUserId).toArray();
+	}
+}
 
-		if (doc.querySelector('parseerror')) {
-			throw new Error('Invalid OPML file — could not parse XML.');
-		}
+async function updateRefreshInterval(event: Event) {
+	const target = event.target as HTMLSelectElement;
+	refreshInterval = parseInt(target.value, 10);
+	if (browser && currentUserId !== null) {
+		await setUserSetting(currentUserId, 'refreshInterval', refreshInterval);
+	}
+}
 
-		let imported = 0;
-		let skipped = 0;
+async function handleCreateUser() {
+	if (!newUserName.trim()) return;
+	await createUser(newUserName.trim());
+	newUserName = '';
+	showUserModal = false;
+	await loadData();
+}
 
-		// Recursively process <outline> elements.
-		// Outlines with xmlUrl are feeds; those without (but with children) are folders.
-		async function processOutline(outline: Element, parentFolderId: number | undefined) {
-			const xmlUrl = outline.getAttribute('xmlUrl');
-			const title = (outline.getAttribute('title') || outline.getAttribute('text') || '').trim();
-
-			if (xmlUrl) {
-				// Feed outline
-				const existing = await db.feeds.where('url').equals(xmlUrl).first();
-				if (!existing) {
-					await db.feeds.add({ userId, url: xmlUrl, title: title || xmlUrl, folderId: parentFolderId });
-					imported++;
-				} else {
-					skipped++;
-				}
-			} else {
-				// Folder outline — recurse into children
-				const children = Array.from(outline.children).filter(c => c.tagName === 'outline');
-				if (children.length === 0) return;
-
-				const folderName = title || 'Imported Folder';
-				let folderId: number | undefined = parentFolderId;
-
-				const existing = await db.folders
-					.where('userId').equals(userId)
-					.and(f => f.name === folderName && f.parentId === parentFolderId)
-					.first();
-
-				if (existing?.id !== undefined) {
-					folderId = existing.id;
-				} else {
-					folderId = (await db.folders.add({ userId, name: folderName, parentId: parentFolderId })) as number;
-				}
-
-				for (const child of children) {
-					await processOutline(child, folderId);
-				}
-			}
-		}
-
-		const rootOutlines = Array.from(doc.querySelectorAll('body > outline'));
-		for (const outline of rootOutlines) {
-			await processOutline(outline, undefined);
-		}
-
-		alert(`Import complete: ${imported} feed${imported !== 1 ? 's' : ''} imported, ${skipped} already existed.`);
+async function handleDeleteUser(userId: number) {
+	if (users.length <= 1) {
+		alert('Cannot delete the last user. At least one user is required.');
+		return;
+	}
+	if (confirm('Are you sure you want to delete this user? All their feeds, articles, and settings will be permanently deleted.')) {
+		await deleteUser(userId);
 		await loadData();
 	}
+}
+
+async function handleRenameUser(userId: number) {
+	const user = users.find(u => u.id === userId);
+	if (!user) return;
+
+	const newName = prompt('Enter new name:', user.name);
+	if (newName && newName.trim() && newName.trim() !== user.name) {
+		await renameUser(userId, newName.trim());
+		await loadData();
+	}
+}
+
+async function handleSwitchUser(userId: number) {
+	await setCurrentUserId(userId);
+	currentUserId = userId;
+	if (browser) {
+		window.location.reload();
+	}
+}
+
+function openAddUserModal() {
+	newUserName = '';
+	showUserModal = true;
+}
+
+// ── OPML Export ──────────────────────────────────────────────────────────
+
+function escapeXml(str: string): string {
+	return str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+}
+
+function handleExportOPML() {
+	const lines: string[] = [
+		'<?xml version="1.0" encoding="UTF-8"?>',
+		'<opml version="2.0">',
+		'  <head>',
+		`    <title>${escapeXml('iikiti Feeds')}</title>`,
+		'  </head>',
+		'  <body>',
+	];
+
+	// Render folder subtree recursively, starting from root (parentId === undefined)
+	function renderOutlines(parentFolderId: number | undefined, indent: string) {
+		// Child folders at this level
+		for (const folder of folders.filter(f => f.parentId === parentFolderId)) {
+			lines.push(`${indent}<outline text="${escapeXml(folder.name)}" title="${escapeXml(folder.name)}">`);
+			renderOutlines(folder.id, indent + '  ');
+			lines.push(`${indent}</outline>`);
+		}
+		// Feeds at this level
+		for (const feed of feeds.filter(f => f.folderId === parentFolderId)) {
+			lines.push(
+				`${indent}<outline type="rss" text="${escapeXml(feed.title)}" title="${escapeXml(feed.title)}" xmlUrl="${escapeXml(feed.url)}"/>`
+			);
+		}
+	}
+
+	renderOutlines(undefined, '    ');
+
+	lines.push('  </body>', '</opml>');
+
+	const blob = new Blob([lines.join('\n')], { type: 'text/xml' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = 'iikiti-feeds.opml';
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	URL.revokeObjectURL(url);
+}
+
+// ── OPML Import ──────────────────────────────────────────────────────────
+
+function triggerImportPicker() {
+	opmlImportError = '';
+	fileInput?.click();
+}
+
+async function handleImportFileSelected(event: Event) {
+	const input = event.target as HTMLInputElement;
+	const file = input.files?.[0];
+	if (!file || currentUserId === null) return;
+
+	// Reset so the same file can be re-selected if needed
+	input.value = '';
+
+	try {
+		await importOPML(file, currentUserId);
+	} catch (err) {
+		opmlImportError = err instanceof Error ? err.message : String(err);
+	}
+}
+
+async function importOPML(file: File, userId: number) {
+	const text = await file.text();
+	const parser = new DOMParser();
+	const doc = parser.parseFromString(text, 'text/xml');
+
+	if (doc.querySelector('parseerror')) {
+		throw new Error('Invalid OPML file — could not parse XML.');
+	}
+
+	let imported = 0;
+	let skipped = 0;
+
+	// Recursively process <outline> elements.
+	// Outlines with xmlUrl are feeds; those without (but with children) are folders.
+	async function processOutline(outline: Element, parentFolderId: number | undefined) {
+		const xmlUrl = outline.getAttribute('xmlUrl');
+		const title = (outline.getAttribute('title') || outline.getAttribute('text') || '').trim();
+
+		if (xmlUrl) {
+			// Feed outline
+			const existing = await db.feeds.where('url').equals(xmlUrl).first();
+			if (!existing) {
+				await db.feeds.add({ userId, url: xmlUrl, title: title || xmlUrl, folderId: parentFolderId });
+				imported++;
+			} else {
+				skipped++;
+			}
+		} else {
+			// Folder outline — recurse into children
+			const children = Array.from(outline.children).filter(c => c.tagName === 'outline');
+			if (children.length === 0) return;
+
+			const folderName = title || 'Imported Folder';
+			let folderId: number | undefined = parentFolderId;
+
+			const existing = await db.folders
+				.where('userId').equals(userId)
+				.and(f => f.name === folderName && f.parentId === parentFolderId)
+				.first();
+
+			if (existing?.id !== undefined) {
+				folderId = existing.id;
+			} else {
+				folderId = (await db.folders.add({ userId, name: folderName, parentId: parentFolderId })) as number;
+			}
+
+			for (const child of children) {
+				await processOutline(child, folderId);
+			}
+		}
+	}
+
+	const rootOutlines = Array.from(doc.querySelectorAll('body > outline'));
+	for (const outline of rootOutlines) {
+		await processOutline(outline, undefined);
+	}
+
+	alert(`Import complete: ${imported} feed${imported !== 1 ? 's' : ''} imported, ${skipped} already existed.`);
+	await loadData();
+}
 </script>
 
 <div class="p-8 bg-gray-100 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100">
