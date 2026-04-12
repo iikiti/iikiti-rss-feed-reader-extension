@@ -1,7 +1,9 @@
 <script lang="ts">
-import type { Feed, Folder, View, SortOption } from '$lib/db';
+import type { Feed, Folder, View } from '$lib/models';
 import type { SvelteSet } from 'svelte/reactivity';
-import SidebarItem from '$lib/components/sidebar/SidebarItem.svelte';
+import FolderItem from './FolderItem.svelte';
+import FeedItem from './FeedItem.svelte';
+import ViewItem from './ViewItem.svelte';
 
 type DragOverItem = { type: 'folder' | 'feed'; id: number; position: 'above' | 'below' | 'on' } | null;
 
@@ -46,9 +48,9 @@ let {
 	feeds: Feed[];
 	folders: Folder[];
 	views: View[];
-feedCounts: Record<number, { total: number; unread: number }>;
-folderCounts: Record<number, { total: number; unread: number }>;
-viewCounts: Record<number, { total: number; unread: number }>;
+	feedCounts: Record<number, { total: number; unread: number }>;
+	folderCounts: Record<number, { total: number; unread: number }>;
+	viewCounts: Record<number, { total: number; unread: number }>;
 	expandedFolders: SvelteSet<number>;
 	selectedFeedId: number | null;
 	selectedFolderId: number | null;
@@ -79,7 +81,6 @@ viewCounts: Record<number, { total: number; unread: number }>;
 </script>
 
 <aside class="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
-	<!-- Header -->
 	<div class="p-4 border-b border-gray-200 dark:border-gray-700">
 		<div class="flex justify-between items-center mb-2">
 			<h1 class="text-xl font-bold">iikiti</h1>
@@ -88,7 +89,6 @@ viewCounts: Record<number, { total: number; unread: number }>;
 				<a href="/settings" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
 			</div>
 		</div>
-		<!-- User Switcher -->
 		<div class="text-sm">
 			<label for="user-select" class="text-xs text-gray-500">User:</label>
 			<select
@@ -104,7 +104,6 @@ viewCounts: Record<number, { total: number; unread: number }>;
 		</div>
 	</div>
 
-	<!-- Nav -->
 	<div class="p-2 overflow-y-auto flex-1">
 		<div class="mb-2 flex gap-1">
 			<button onclick={() => onOpenAddModal('feed')} class="flex-1 text-xs bg-blue-600 text-white py-1 rounded">+ Feed</button>
@@ -115,23 +114,22 @@ viewCounts: Record<number, { total: number; unread: number }>;
 		<div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Views</div>
 		<ul class="mb-3">
 			{#each views as view}
-				<SidebarItem
-					type="view"
+				<ViewItem
 					{view}
 					viewCount={viewCounts[view.id!] || { total: 0, unread: 0 }}
 					selected={selectedViewId === view.id}
-					onselect={() => onSelectView(view.id!)}
-					onedit={() => onOpenAddModal('view', view)}
-					ondelete={() => onDeleteView(view.id!)}
+					onSelect={() => onSelectView(view.id!)}
+					onEdit={() => onOpenAddModal('view', view)}
+					onDelete={() => onDeleteView(view.id!)}
 				/>
 			{/each}
 		</ul>
 
 		<div class="text-xs font-bold uppercase text-gray-500 mb-1 px-2">Feeds</div>
 		<ul>
-		<li>
-			<div
-				class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}"
+			<li>
+				<div
+					class="w-full text-left px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 {selectedFeedId === null && selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900' : ''}"
 					onclick={onSelectAllArticles}
 					role="button"
 					tabindex="0"
@@ -141,12 +139,10 @@ viewCounts: Record<number, { total: number; unread: number }>;
 				</div>
 			</li>
 			{#each sortedRootFolders as folder}
-				<SidebarItem
-					type="folder"
+				<FolderItem
 					{folder}
-					folderCount={folderCounts[folder.id!] || { total: 0, unread: 0 }}
-					allFolders={folders}
-					allFeeds={feeds}
+					{folders}
+					{feeds}
 					{feedCounts}
 					{folderCounts}
 					{expandedFolders}
@@ -169,16 +165,15 @@ viewCounts: Record<number, { total: number; unread: number }>;
 				/>
 			{/each}
 			{#each sortedUnfolderedFeeds as feed}
-				<SidebarItem
-					type="feed"
+				<FeedItem
 					{feed}
-					feedCount={feedCounts[feed.id!] || { total: 0, unread: 0 }}
+					{feedCounts}
 					selected={selectedFeedId === feed.id}
 					depth={0}
 					{dragOverItem}
-					onselect={() => onSelectFeed(feed.id!)}
-					onedit={() => onOpenAddModal('feed', feed)}
-					ondelete={() => onDeleteFeed(feed.id!)}
+					onSelect={() => onSelectFeed(feed.id!)}
+					onEdit={() => onOpenAddModal('feed', feed)}
+					onDelete={() => onDeleteFeed(feed.id!)}
 					{handleDragStart}
 					{handleDragOver}
 					{handleDragLeave}
