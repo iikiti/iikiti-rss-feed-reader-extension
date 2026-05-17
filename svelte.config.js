@@ -23,6 +23,9 @@ const config = {
 			directives: {
 				'script-src': ['self']
 			}
+		},
+		paths: {
+			base: '/dist'
 		}
 	}
 };

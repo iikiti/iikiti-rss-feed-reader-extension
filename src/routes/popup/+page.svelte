@@ -2,6 +2,7 @@
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
 import { getCurrentUserId, db, getAllUsers } from '$lib/db';
+import { resolve } from '$app/paths';
 
 let unreadCount = 0;
 let currentUserName = 'Loading...';
@@ -32,6 +33,6 @@ async function loadData() {
 	</div>
 	<button class="w-full bg-blue-600 text-white p-2 rounded mb-2 hover:bg-blue-700">Quick Add Tab</button>
 	<div class="text-sm mb-4">Unread: <span class="font-bold">{unreadCount}</span></div>
-	<a href="/reader/index.html" target="_blank" rel="external" class="block text-center text-blue-500 hover:underline">Open Reader</a>
-	<a href="/settings/index.html" target="_blank" rel="external" class="block text-center text-blue-500 hover:underline mt-2">Settings</a>
+	<a href="{resolve('/reader/index.html', {})}" target="_blank" rel="external" class="block text-center text-blue-500 hover:underline">Open Reader</a>
+	<a href="{resolve('/settings/index.html', {})}" target="_blank" rel="external" class="block text-center text-blue-500 hover:underline mt-2">Settings</a>
 </div>

@@ -5,6 +5,7 @@ import { db, getAllUsers, getCurrentUserId, setCurrentUserId, createUser, delete
 import Modal from '$lib/components/Modal.svelte';
 import { darkMode, setDarkMode, type DarkModeOption } from '$lib/stores/darkMode';
 import { allUserSettings, setUserSetting, getUserSettingsSnapshot } from '$lib/stores/settings';
+import { resolve } from '$app/paths';
 
 let refreshInterval = 15;
 let users: User[] = [];
@@ -242,7 +243,7 @@ async function importOPML(file: File, userId: number) {
 <div class="p-8 bg-gray-100 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100">
 	<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 p-6 rounded shadow">
 		<div class="flex items-center mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
-			<a href="/reader" class="mr-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" title="Back to Reader">
+			<a href="{resolve('/reader', {})}" class="mr-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" title="Back to Reader">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
 			</a>
 			<h1 class="text-2xl font-bold">Settings</h1>

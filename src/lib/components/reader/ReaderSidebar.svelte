@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { Feed, Folder, View } from '$lib/models';
 import type { SvelteSet } from 'svelte/reactivity';
+import { resolve } from '$app/paths';
 import FolderItem from './FolderItem.svelte';
 import FeedItem from './FeedItem.svelte';
 import ViewItem from './ViewItem.svelte';
@@ -86,7 +87,7 @@ let {
 			<h1 class="text-xl font-bold">iikiti</h1>
 			<div class="flex items-center space-x-1">
 				<button onclick={() => onOpenAddModal('feed')} class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-1" title="Add">+</button>
-				<a href="/settings" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
+				<a href="{resolve('/settings', {})}" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">⚙️</a>
 			</div>
 		</div>
 		<div class="text-sm">
