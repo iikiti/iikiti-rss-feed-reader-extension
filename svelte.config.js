@@ -10,22 +10,13 @@ const config = {
 			fallback: 'app.html' // SPA fallback
 		}),
 		appDir: 'internal', // Make it cleaner for extension
-		prerender: {
-			handleHttpError: ({ path, referrer, message }) => {
-				// Ignore 404s for favicon during prerender
-				if (path.includes('.webp') && message.includes('404')) {
-					return;
-				}
-				throw new Error(message);
-			}
-		},
 		csp: {
 			directives: {
 				'script-src': ['self']
 			}
 		},
 		paths: {
-			base: '/dist'
+			base: '/build'
 		}
 	}
 };

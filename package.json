@@ -2,14 +2,14 @@
 	"name": "iikiti",
 	"version": "0.0.1",
 	"private": true,
+	"description": "Cross-browser RSS feed reader web extension.",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && node scripts/extract-inline.js && bun run build:scripts && bun run copy:static",
+		"build": "vite build && node scripts/extract-inline.js && bun run build:scripts",
 		"preview": "vite preview",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
-		"copy:static": "cp -r src/static build/",
-		"build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm && cp src/manifest.json build/manifest.json"
+		"build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^3.3.1",
@@ -17,6 +17,7 @@
 		"@sveltejs/kit": "^2.60.1",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@types/chrome": "^0.1.42",
+		"@types/node": "^25.8.0",
 		"autoprefixer": "^10.5.0",
 		"esbuild": "^0.27.7",
 		"postcss": "^8.5.14",
