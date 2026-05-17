@@ -5,16 +5,12 @@ export default defineConfig({
 	plugins: [
 		sveltekit(),
 		{
-            name: 'generate-manifest',
-            // Use closeBundle to ensure all chunks are written and aliases are resolved
-            async closeBundle() {
-                try {
-                    const { generateManifest } = await import('./scripts/generate-manifest.js');
-                    await generateManifest();
-                } catch (error) {
-                    console.error('Failed to generate manifest:', error);
-                }
-            }
-        },
+			name: 'generate-manifest',
+			apply: 'build',
+			async closeBundle() {
+				const { generateManifest } = await import('./scripts/generate-manifest.ts');
+				generateManifest();
+			}
+		},
 	]
 });
