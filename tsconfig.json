@@ -11,5 +11,5 @@
 	"strict": true,
 	"types": ["@sveltejs/kit", "chrome", "node"]
 	},
-		"include": [".d.ts", "src/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "src/**/*.svelte", "scripts/**/*.ts"]
+		"include": [".d.ts", "src/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "src/**/*.svelte", "scripts/**/*.ts", ".resources/**/*.json"]
 }

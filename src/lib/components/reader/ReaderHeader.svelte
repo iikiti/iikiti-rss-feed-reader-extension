@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SortOption } from '$lib/db';
+	import languagesData from '../../../../.resources/cldr/languages.json';
 
 	let {
 		currentTitle,
@@ -21,23 +22,7 @@
 
 	const languages = [
 		{ code: '', label: 'Auto (All)' },
-		{ code: 'en-US', label: 'English (US)' },
-		{ code: 'en-GB', label: 'English (UK)' },
-		{ code: 'de-DE', label: 'German' },
-		{ code: 'fr-FR', label: 'French' },
-		{ code: 'es-ES', label: 'Spanish' },
-		{ code: 'it-IT', label: 'Italian' },
-		{ code: 'pt-BR', label: 'Portuguese (BR)' },
-		{ code: 'pt-PT', label: 'Portuguese (PT)' },
-		{ code: 'nl-NL', label: 'Dutch' },
-		{ code: 'pl-PL', label: 'Polish' },
-		{ code: 'ru-RU', label: 'Russian' },
-		{ code: 'ja-JP', label: 'Japanese' },
-		{ code: 'ko-KR', label: 'Korean' },
-		{ code: 'zh-CN', label: 'Chinese (Simplified)' },
-		{ code: 'zh-TW', label: 'Chinese (Traditional)' },
-		{ code: 'ar-SA', label: 'Arabic' },
-		{ code: 'hi-IN', label: 'Hindi' },
+		...Object.entries(languagesData).map(([code, label]) => ({ code, label: label as string }))
 	];
 </script>
 
