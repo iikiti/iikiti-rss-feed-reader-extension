@@ -5,11 +5,12 @@
 	"description": "Cross-browser RSS feed reader web extension.",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && node scripts/extract-inline.js && bun run build:scripts",
+		"build": "vite build && node scripts/extract-inline.js && bun run build:cldr && bun run build:scripts",
 		"preview": "vite preview",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-check --tsconfig ./tsconfig.json --watch",
-		"build:scripts": "esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm"
+		"build:cldr": "bun run scripts/build-languages.ts",
+		"build:scripts": "mkdir -p build/cldr && cp .resources/cldr/languages.json build/cldr/languages.json && esbuild src/background/index.ts --bundle --outfile=build/background.js --format=esm && esbuild src/content/index.ts --bundle --outfile=build/content.js --format=esm"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^3.3.1",
@@ -30,6 +31,7 @@
 		"vite": "^7.3.3"
 	},
 	"dependencies": {
+		"adm-zip": "^0.5.17",
 		"dexie": "^3.2.7"
 	},
 	"type": "module"

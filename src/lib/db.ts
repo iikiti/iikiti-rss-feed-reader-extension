@@ -1,7 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 
-// Import text segmenter for search
-import { segmentWords, generateAllNgrams } from './text-segmenter';
+import { segmentWords, generateAllNgrams, getSegmenter, normalizeLanguage } from './text-segmenter';
 
 export interface User {
 	id?: number;
@@ -19,6 +18,7 @@ export interface Feed {
 	lastFetched?: Date;
 	error?: string;
 	favicon?: string;
+	language?: string;
 }
 
 export interface Article {
@@ -29,14 +29,14 @@ export interface Article {
 	title: string;
 	link: string;
 	content: string;
-	siteContent?: string; // Content fetched from the actual article page
+	siteContent?: string;
 	snippet: string;
 	pubDate: number;
 	read: boolean;
 	starred: boolean;
 	author?: string;
 	image?: string;
-	// Full-text search index fields
+	language?: string;
 	titleWords?: string[];
 	snippetWords?: string[];
 	siteContentWords?: string[];
@@ -49,7 +49,7 @@ export interface Folder {
 	id?: number;
 	userId: number;
 	name: string;
-	parentId?: number; // For subfolders
+	parentId?: number;
 	order?: number;
 }
 
@@ -57,7 +57,7 @@ export interface View {
 	id?: number;
 	userId: number;
 	name: string;
-	filterJson: string; // JSON string of filter criteria
+	filterJson: string;
 }
 
 export class IikitiDB extends Dexie {
@@ -67,7 +67,7 @@ export class IikitiDB extends Dexie {
 	folders!: Table<Folder>;
 	views!: Table<View>;
 
-	constructor() {
+constructor() {
 		super('iikiti');
 		// Version 1: Original schema (no users)
 		// Version 2: Added views
@@ -78,11 +78,12 @@ export class IikitiDB extends Dexie {
 		// Version 7: Added full-text search index fields
 		// Version 8: Added order field to folders and feeds
 		// Version 9: Added compound indexes [userId+pubDate] and [userId+title] for efficient
-		//             per-user sorted pagination without loading all rows into memory
-		this.version(9).stores({
+		//            per-user sorted pagination without loading all rows into memory
+		// Version 10: Added language field to articles and feeds
+		this.version(10).stores({
 			users: '++id, &name',
 			feeds: '++id, userId, &url, folderId, [userId+order]',
-			articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title, [userId+pubDate], [userId+title]',
+			articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title, [userId+pubDate], [userId+title], language',
 			folders: '++id, userId, [userId+name], parentId, [userId+order]',
 			views: '++id, userId, &name'
 		});
@@ -297,24 +298,27 @@ export async function getPaginatedArticles(
 	return { articles: articles.slice(offset, offset + limit), hasMore };
 }
 
-// Full-text search function that searches indexed fields.
-// Segments the query into words and n-grams and matches against indexed arrays.
+export interface SearchOptions {
+	feedId?: number;
+	read?: boolean;
+	starred?: boolean;
+	limit?: number;
+	offset?: number;
+	useNgrams?: boolean;
+	language?: string;
+}
+
 export async function searchArticles(
 	userId: number,
 	query: string,
-	options: {
-		feedId?: number;
-		read?: boolean;
-		starred?: boolean;
-		limit?: number;
-		offset?: number;
-	} = {}
+	options: SearchOptions = {}
 ): Promise<Article[]> {
 	const limit = options.limit ?? 25;
 	const offset = options.offset ?? 0;
+	const useNgrams = options.useNgrams ?? true;
+	const searchLocale = options.language ? normalizeLanguage(options.language) : undefined;
 
 	if (!query || !query.trim()) {
-		// No query — use compound index for sorted, paginated results
 		let coll = db.articles
 			.where('[userId+pubDate]')
 			.between([userId, Dexie.minKey], [userId, Dexie.maxKey])
@@ -327,16 +331,13 @@ export async function searchArticles(
 		return coll.offset(offset).limit(limit).toArray();
 	}
 
-	// Segment query into words and n-grams
-	const words = segmentWords(query);
-	const ngrams = generateAllNgrams(words, 3);
-	const searchTerms = [...new Set([...words, ...ngrams])]; // dedupe
+	const words = segmentWords(query, searchLocale);
+	const searchTerms = useNgrams ? [...new Set([...words, ...generateAllNgrams(words, 3)])] : words;
 
 	if (searchTerms.length === 0) {
 		return [];
 	}
 
-	// Load all user articles and filter by search terms in memory (FTS requires a full scan)
 	let articles = await db.articles.where('userId').equals(userId).toArray();
 
 	if (options.feedId !== undefined) {
@@ -353,11 +354,15 @@ export async function searchArticles(
 		const searchableFields = [
 			...(article.titleWords || []),
 			...(article.snippetWords || []),
-			...(article.siteContentWords || []),
-			...(article.titleNgrams || []),
-			...(article.snippetNgrams || []),
-			...(article.siteContentNgrams || [])
+			...(article.siteContentWords || [])
 		];
+		if (useNgrams) {
+			searchableFields.push(
+				...(article.titleNgrams || []),
+				...(article.snippetNgrams || []),
+				...(article.siteContentNgrams || [])
+			);
+		}
 		return searchTerms.some(term =>
 			searchableFields.some(field => field.includes(term))
 		);

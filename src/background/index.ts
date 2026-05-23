@@ -80,21 +80,23 @@ async function scheduleNextRefresh() {
 async function refreshFeed(feed: Feed) {
 	console.log(`Refreshing feed: ${feed.title}`);
 	broadcastToTabs({ type: 'refresh-started' });
-	
+
 	const interval = await getRefreshInterval();
 	const userId = await getCurrentUserId();
-	
+
 	try {
 		const response = await fetch(feed.url);
 		const text = await response.text();
 		const parsedFeed = parseFeed(text);
 
+		const articleLanguage = parsedFeed.items[0]?.language || feed.language || 'en-US';
 		const existingArticles = await db.articles.where('feedId').equals(feed.id!).toArray();
 		const existingGuids = new Set(existingArticles.map(a => a.guid));
 		const newArticles = parsedFeed.items
 			.filter(item => !existingGuids.has(item.guid))
 			.map(item => {
-				const searchIndex = generateSearchIndex(item.title, item.snippet, item.siteContent);
+				const itemLanguage = item.language || articleLanguage;
+				const searchIndex = generateSearchIndex(item.title, item.snippet, item.siteContent, itemLanguage);
 				return {
 					userId,
 					feedId: feed.id!,
@@ -115,17 +117,17 @@ async function refreshFeed(feed: Feed) {
 
 		console.log(`Refreshed feed: ${feed.title} (${feed.url}). New articles: ${newArticles.length}`);
 		if (newArticles.length > 0) await db.articles.bulkAdd(newArticles);
-		
+
 		const now = Date.now();
 		await db.feeds.update(feed.id!, {
 			lastFetched: now,
-			error: undefined 
+			error: undefined
 		});
 	} catch (err) {
 		console.error(`Failed to fetch ${feed.url}`, err);
 		await db.feeds.update(feed.id!, { error: String(err) });
 	}
-	
+
 	broadcastToTabs({ type: 'refresh-complete' });
 }
 
@@ -143,12 +145,14 @@ async function refreshAllFeeds() {
 			const text = await response.text();
 			const parsedFeed = parseFeed(text);
 
+			const articleLanguage = parsedFeed.items[0]?.language || feed.language || 'en-US';
 			const existingArticles = await db.articles.where('feedId').equals(feed.id!).toArray();
 			const existingGuids = new Set(existingArticles.map(a => a.guid));
 			const newArticles = parsedFeed.items
 				.filter(item => !existingGuids.has(item.guid))
 				.map(item => {
-					const searchIndex = generateSearchIndex(item.title, item.snippet, item.siteContent);
+					const itemLanguage = item.language || articleLanguage;
+					const searchIndex = generateSearchIndex(item.title, item.snippet, item.siteContent, itemLanguage);
 					return {
 						userId,
 						feedId: feed.id!,
@@ -169,11 +173,11 @@ async function refreshAllFeeds() {
 
 			console.log(`Refreshing feed: ${feed.title} (${feed.url}). New articles: ${newArticles.length}`);
 			if (newArticles.length > 0) await db.articles.bulkAdd(newArticles);
-			
+
 			const now = Date.now();
-			await db.feeds.update(feed.id!, { 
+			await db.feeds.update(feed.id!, {
 				lastFetched: now,
-				error: undefined 
+				error: undefined
 			});
 		} catch (err) {
 			console.error(`Failed to fetch ${feed.url}`, err);
@@ -193,6 +197,7 @@ async function handleAddFeed(feedUrl: string, feedTitle: string, feedFolderId: n
 
 	const parsedFeed = await fetchAndParseFeed(feedUrl);
 
+	const articleLanguage = parsedFeed.items[0]?.language || 'en-US';
 	const now = new Date();
 	const feedId = await db.feeds.add({
 		userId,
@@ -200,10 +205,12 @@ async function handleAddFeed(feedUrl: string, feedTitle: string, feedFolderId: n
 		title: feedTitle,
 		folderId: feedFolderId || undefined,
 		lastFetched: now,
+		language: articleLanguage,
 	});
 
 	const articles = parsedFeed.items.slice(0, 10).map(item => {
-		const searchIndex = generateSearchIndex(item.title, item.snippet, item.siteContent);
+		const itemLanguage = item.language || articleLanguage;
+		const searchIndex = generateSearchIndex(item.title, item.snippet, item.siteContent, itemLanguage);
 		return {
 			userId,
 			feedId: feedId as number,

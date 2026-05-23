@@ -5,19 +5,20 @@
     "": {
       "name": "iikiti",
       "dependencies": {
+        "adm-zip": "^0.5.17",
         "dexie": "^3.2.7",
       },
       "devDependencies": {
         "@sveltejs/adapter-auto": "^3.3.1",
         "@sveltejs/adapter-static": "^3.0.10",
-        "@sveltejs/kit": "^2.60.1",
+        "@sveltejs/kit": "^2.61.0",
         "@sveltejs/vite-plugin-svelte": "^6.2.4",
         "@types/chrome": "^0.1.42",
-        "@types/node": "^25.8.0",
+        "@types/node": "^25.9.1",
         "autoprefixer": "^10.5.0",
         "esbuild": "^0.27.7",
-        "postcss": "^8.5.14",
-        "svelte": "^5.55.7",
+        "postcss": "^8.5.15",
+        "svelte": "^5.55.9",
         "svelte-check": "^4.4.8",
         "tailwindcss": "^3.4.19",
         "tiny-glob": "^0.2.9",
@@ -181,6 +182,8 @@
     "@types/trusted-types": ["@types/trusted-types@2.0.7", "", {}, "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw=="],
 
     "acorn": ["acorn@8.16.0", "", { "bin": "bin/acorn" }, "sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw=="],
+
+    "adm-zip": ["adm-zip@0.5.17", "", {}, "sha512-+Ut8d9LLqwEvHHJl1+PIHqoyDxFgVN847JTVM3Izi3xHDWPE4UtzzXysMZQs64DMcrJfBeS/uoEP4AD3HQHnQQ=="],
 
     "any-promise": ["any-promise@1.3.0", "", {}, "sha512-7UvmKalWRt1wgjL1RrGxoSJW/0QZFIegpeGvZG9kjp8vrRu55XTHbwnqq2GpXm9uLbcuhxm3IqX9OB4MZR1b2A=="],
 

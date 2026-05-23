@@ -1,8 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, searchArticles, getPaginatedArticles, getAllArticleCounts, type ArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption } from '$lib/db';
+import { db, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, searchArticles, getPaginatedArticles, getAllArticleCounts, type ArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption, type SearchOptions } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
+import { segmentWords, generateAllNgrams, getSegmenter, normalizeLanguage } from '$lib/text-segmenter';
 import { SvelteSet } from 'svelte/reactivity';
 import {
 	Feed, Folder, View,
@@ -29,6 +30,8 @@ let selectedViewId: number | null = $state(null);
 let selectedFolderId: number | null = $state(null);
 let selectedFeedId: number | null = $state(null);
 let searchQuery = $state('');
+let useNgrams = $state(true);
+let searchLanguage = $state('');
 
 let feedForm: FeedFormState = $state(createFeedFormState());
 let folderForm: FolderFormState = $state(createFolderFormState());
@@ -243,15 +246,18 @@ const filteredArticles = $derived(
 			}
 		}
 		if (searchQuery) {
-			const query = searchQuery.toLowerCase();
-			const searchWords = query.split(/\s+/).filter(w => w.length >= 2);
-			return searchWords.length > 0 && (
-				article.titleWords?.some(w => searchWords.some(sw => w.includes(sw))) ||
-				article.snippetWords?.some(w => searchWords.some(sw => w.includes(sw))) ||
-				article.siteContentWords?.some(w => searchWords.some(sw => w.includes(sw))) ||
-				article.titleNgrams?.some(n => searchWords.some(sw => n.includes(sw))) ||
-				article.snippetNgrams?.some(n => searchWords.some(sw => n.includes(sw))) ||
-				article.siteContentNgrams?.some(n => searchWords.some(sw => n.includes(sw)))
+			const locale = searchLanguage ? normalizeLanguage(searchLanguage) : (article.language ? normalizeLanguage(article.language) : undefined);
+			const queryWords = segmentWords(searchQuery, locale);
+			const searchTerms = useNgrams
+				? [...new Set([...queryWords, ...generateAllNgrams(queryWords, 3)])]
+				: queryWords;
+			return searchTerms.length > 0 && (
+				article.titleWords?.some(w => searchTerms.some(sw => w.includes(sw))) ||
+				article.snippetWords?.some(w => searchTerms.some(sw => w.includes(sw))) ||
+				article.siteContentWords?.some(w => searchTerms.some(sw => w.includes(sw))) ||
+				(useNgrams && (article.titleNgrams?.some(n => searchTerms.some(sw => n.includes(sw))) ||
+				article.snippetNgrams?.some(n => searchTerms.some(sw => n.includes(sw))) ||
+				article.siteContentNgrams?.some(n => searchTerms.some(sw => n.includes(sw)))))
 			);
 		}
 		return true;
@@ -347,9 +353,15 @@ async function loadData() {
 	await loadAllCounts();
 	
 	articleOffset = 0;
-	
+
 	if (searchQuery) {
-		const searchResults = await searchArticles(currentUserId, searchQuery, { limit: 25, offset: 0 });
+		const searchOptions: SearchOptions = {
+			limit: 25,
+			offset: 0,
+			useNgrams,
+			language: searchLanguage || undefined
+		};
+		const searchResults = await searchArticles(currentUserId, searchQuery, searchOptions);
 		articles = searchResults;
 		hasMoreArticles = searchResults.length >= 25;
 	} else {
@@ -370,9 +382,15 @@ async function loadMore() {
 	
 	isLoadingMore = true;
 	const nextOffset = articleOffset + 25;
-	
+
 	if (searchQuery) {
-		const moreResults = await searchArticles(currentUserId, searchQuery, { limit: 25, offset: nextOffset });
+		const searchOptions: SearchOptions = {
+			limit: 25,
+			offset: nextOffset,
+			useNgrams,
+			language: searchLanguage || undefined
+		};
+		const moreResults = await searchArticles(currentUserId, searchQuery, searchOptions);
 		articles = [...articles, ...moreResults];
 		hasMoreArticles = moreResults.length >= 25;
 	} else {
@@ -592,6 +610,8 @@ function getDisplayContent(article: Article, index: number): string {
 			{currentTitle}
 			{sortBy}
 			bind:searchQuery
+			bind:useNgrams
+			bind:searchLanguage
 			onRefresh={refreshFeeds}
 			onSortChange={handleSortChange}
 		/>

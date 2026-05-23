@@ -3,14 +3,40 @@
  * Generates word lists and n-grams from text content.
  */
 
-// Create a segmenter for word tokenization
-// Using 'en' locale as default, can be customized per-use
-const wordSegmenter = new Intl.Segmenter('en', { granularity: 'word' });
+const DEFAULT_LOCALE = 'en-US';
+
+const segmenterCache = new Map<string, Intl.Segmenter>();
+
+export function getSegmenter(locale?: string): Intl.Segmenter {
+	const loc = locale || DEFAULT_LOCALE;
+	if (!segmenterCache.has(loc)) {
+		segmenterCache.set(loc, new Intl.Segmenter(loc, { granularity: 'word' }));
+	}
+	return segmenterCache.get(loc)!;
+}
+
+/**
+ * Normalizes a language tag to a standard format.
+ * Defaults to 'en-US' for unknown tags.
+ */
+export function normalizeLanguage(langCode?: string): string {
+	if (!langCode) return DEFAULT_LOCALE;
+	const lower = langCode.toLowerCase();
+	if (lower === 'en' || lower === 'english') return 'en-US';
+	if (lower === 'en-us' || lower === 'en-us') return 'en-US';
+	const normalized = lower.replace('_', '-');
+	if (normalized.match(/^[a-z]{2,3}(-[a-z]{2})?$/)) {
+		const parts = normalized.split('-');
+		if (parts[0] === 'en' && parts.length === 1) return 'en-US';
+		return `${parts[0].toLowerCase()}-${parts[1]?.toUpperCase() || 'US'}`;
+	}
+	return DEFAULT_LOCALE;
+}
 
 /**
  * Strips HTML tags from a string.
  */
-function stripHtml(html: string): string {
+export function stripHtml(html: string): string {
 	if (!html) return '';
 	return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -19,23 +45,23 @@ function stripHtml(html: string): string {
  * Segments text into individual words using Intl.Segmenter.
  * Filters out punctuation and whitespace-only segments.
  */
-export function segmentWords(text: string): string[] {
+export function segmentWords(text: string, locale?: string): string[] {
 	if (!text) return [];
-	
+
 	const plainText = stripHtml(text);
 	if (!plainText) return [];
-	
+
 	const words: string[] = [];
-	const segments = wordSegmenter.segment(plainText);
-	
+	const segmenter = getSegmenter(locale);
+	const segments = segmenter.segment(plainText);
+
 	for (const segment of segments) {
 		const word = segment.segment.trim().toLowerCase();
-		// Only include words that have at least 2 characters and contain letters
 		if (word.length >= 2 && /[a-zA-Z]/.test(word)) {
-		  words.push(word);
+			words.push(word);
 		}
 	}
-	
+
 	return words;
 }
 
@@ -46,7 +72,7 @@ export function segmentWords(text: string): string[] {
  */
 export function generateNgrams(words: string[], n: number): string[] {
 	if (!words || words.length < n || n < 1) return [];
-	
+
 	const ngrams: string[] = [];
 	for (let i = 0; i <= words.length - n; i++) {
 		const ngram = words.slice(i, i + n).join(' ');
@@ -79,29 +105,31 @@ export interface SearchIndexFields {
 	titleNgrams: string[];
 	snippetNgrams: string[];
 	siteContentNgrams: string[];
+	language: string;
 }
 
 export function generateSearchIndex(
 	title: string,
 	snippet: string,
-	siteContent?: string
+	siteContent?: string,
+	language?: string
 ): SearchIndexFields {
-	// Segment text into words
-	const titleWords = segmentWords(title);
-	const snippetWords = segmentWords(snippet);
-	const siteContentWords = siteContent ? segmentWords(siteContent) : [];
-	
-	// Generate n-grams (up to trigrams)
+	const normalizedLang = normalizeLanguage(language);
+	const titleWords = segmentWords(title, normalizedLang);
+	const snippetWords = segmentWords(snippet, normalizedLang);
+	const siteContentWords = siteContent ? segmentWords(siteContent, normalizedLang) : [];
+
 	const titleNgrams = generateAllNgrams(titleWords, 3);
 	const snippetNgrams = generateAllNgrams(snippetWords, 3);
 	const siteContentNgrams = generateAllNgrams(siteContentWords, 3);
-	
+
 	return {
 		titleWords,
 		snippetWords,
 		siteContentWords,
 		titleNgrams,
 		snippetNgrams,
-		siteContentNgrams
+		siteContentNgrams,
+		language: normalizedLang
 	};
 }

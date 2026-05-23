@@ -56,9 +56,10 @@ export interface ParsedItem {
 	siteContent?: string;
 	snippet: string;
 	guid: string;
-	pubDate: number; // timestamp
+	pubDate: number;
 	author?: string;
 	image?: string;
+	language?: string;
 }
 
 /**
@@ -260,6 +261,7 @@ export function parseFeed(xmlText: string): ParsedFeed {
 
 function parseRssFeed(xml: Document): ParsedFeed {
 	const title = xml.querySelector("channel > title")?.textContent || "Untitled Feed";
+	const language = xml.querySelector("channel > language")?.textContent || undefined;
 	const items = Array.from(xml.querySelectorAll("item")).map(item => {
 		const title = item.querySelector("title")?.textContent || "No Title";
 		const link = item.querySelector("link")?.textContent || "";
@@ -270,15 +272,14 @@ function parseRssFeed(xml: Document): ParsedFeed {
 		const guid = item.querySelector("guid")?.textContent || link;
 		const pubDateStr = item.querySelector("pubDate")?.textContent || "";
 		const pubDate = pubDateStr ? new Date(pubDateStr).getTime() : Date.now();
-		
-		// Try to get image from various RSS elements
+
 		let image: string | undefined;
 		const mediaContent = item.getElementsByTagNameNS("*", "content")[0]?.getAttribute("url");
 		const mediaThumbnail = item.getElementsByTagNameNS("*", "thumbnail")[0]?.getAttribute("url");
 		const enclosure = item.getElementsByTagName("enclosure")[0];
 		const enclosureType = enclosure?.getAttribute("type") || "";
 		const enclosureUrl = enclosure?.getAttribute("url");
-		
+
 		if (mediaContent) {
 		  image = mediaContent;
 		} else if (mediaThumbnail) {
@@ -286,8 +287,7 @@ function parseRssFeed(xml: Document): ParsedFeed {
 		} else if (enclosureType.startsWith("image/") && enclosureUrl) {
 		  image = enclosureUrl;
 		}
-		
-		// Decode XML/HTML entities in content
+
 		const decodedItem = decodeItemContent({
 		  title,
 		  link,
@@ -296,8 +296,9 @@ function parseRssFeed(xml: Document): ParsedFeed {
 		  guid,
 		  pubDate,
 		  image,
+		  language,
 		});
-		
+
 		return decodedItem;
 	});
 
@@ -309,6 +310,7 @@ function parseRssFeed(xml: Document): ParsedFeed {
 
 function parseAtomFeed(xml: Document): ParsedFeed {
 	const title = xml.querySelector("feed > title")?.textContent || "Untitled Feed";
+	const language = xml.querySelector("feed > language")?.textContent || undefined;
 	const items = Array.from(xml.querySelectorAll("entry")).map(entry => {
 		const title = entry.querySelector("title")?.textContent || "No Title";
 		const link = entry.querySelector("link")?.getAttribute("href") || "";
@@ -318,20 +320,18 @@ function parseAtomFeed(xml: Document): ParsedFeed {
 		const pubDateStr = entry.querySelector("published")?.textContent || entry.querySelector("updated")?.textContent || "";
 		const pubDate = pubDateStr ? new Date(pubDateStr).getTime() : Date.now();
 		const author = entry.querySelector("author > name")?.textContent;
-		
-		// Try to get image from Atom link elements
+
 		let image: string | undefined;
 		const linkElements = entry.querySelectorAll("link");
 		for (const linkEl of linkElements) {
 		  const rel = linkEl.getAttribute("rel");
 		  const type = linkEl.getAttribute("type") || "";
 		  const href = linkEl.getAttribute("href");
-		  
+
 		  if ((rel === "enclosure" || rel === "preview") && type.startsWith("image/") && href) {
 		    image = href;
 		    break;
 		  }
-		  // Also check for media:content or media:thumbnail
 		  const mediaContent = entry.getElementsByTagNameNS("*", "content")[0]?.getAttribute("url");
 		  const mediaThumbnail = entry.getElementsByTagNameNS("*", "thumbnail")[0]?.getAttribute("url");
 		  if (mediaContent) {
@@ -342,8 +342,7 @@ function parseAtomFeed(xml: Document): ParsedFeed {
 		    break;
 		  }
 		}
-		
-		// Decode XML/HTML entities in content
+
 		const decodedItem = decodeItemContent({
 		  title,
 		  link,
@@ -353,8 +352,9 @@ function parseAtomFeed(xml: Document): ParsedFeed {
 		  pubDate,
 		  author,
 		  image,
+		  language,
 		});
-		
+
 		return decodedItem;
 	});
 
