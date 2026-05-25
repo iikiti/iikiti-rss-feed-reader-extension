@@ -177,12 +177,11 @@ async function main() {
 			await fs.promises.writeFile(OUTPUT_PATH, JSON.stringify(existingData, null, 2), 'utf-8');
 			return;
 		}
-		console.log('Existing file is stale, fetching fresh data...');
 		needsRebuild = true;
 	}
 
 	if (needsRebuild) {
-		console.log(`Rebuilding language code list...`);
+		console.log('Existing file is stale, fetching fresh data...');
 		await fs.promises.mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
 		const languages = await buildLanguagesJson();
 		await fs.promises.writeFile(OUTPUT_PATH, JSON.stringify(languages, null, 2), 'utf-8');
