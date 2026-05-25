@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 
+import { eng } from 'stopword';
 import { segmentWords, generateAllNgrams, getSegmenter, normalizeLanguage } from './text-segmenter';
 
 export interface User {
@@ -368,9 +369,343 @@ export async function searchArticles(
 		);
 	});
 
-	return matchingArticles
-		.sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0))
+	return scoreAndSortArticles(matchingArticles, searchTerms)
 		.slice(offset, offset + limit);
+}
+
+// ── Relevance scoring helpers ──────────────────────────────────────────────────
+
+type FieldType = 'title' | 'snippet' | 'siteContent';
+
+const FIELD_WEIGHTS: Record<FieldType, number> = {
+	title: 30,
+	snippet: 10,
+	siteContent: 2,
+};
+
+/** Scaled position bonus: matches earlier in the field score higher.
+ *  Returns a multiplier in [0.8, 1.1]: words at the very start get +10%,
+ *  words at the very end get −20%.
+ */
+function positionMult(fraction: number): number {
+	return 1.1 - 0.3 * fraction; // fraction 0 → 1.1, fraction 1 → 0.8
+}
+
+/** Find the index of `term` (lowercase) among the knowntokens of a field,
+ *  or return -1 if not found.  Used for single-word lookups.
+ */
+function findWordIndex(term: string, wordList: string[]): number {
+	return wordList.indexOf(term);
+}
+
+/** Find the starting word index of the n-gram `ngram` within `wordList`.
+ *  Returns -1 if the n-gram sequence does not appear at that position.
+ */
+function findNgramIndex(ngram: string, wordList: string[]): number {
+	if (wordList.length === 0) return -1;
+	const tokens = ngram.split(' ');
+	for (let i = 0; i <= wordList.length - tokens.length; i++) {
+		let ok = true;
+		for (let j = 0; j < tokens.length; j++) {
+			if (wordList[i + j] !== tokens[j]) { ok = false; break; }
+		}
+		if (ok) return i;
+	}
+	return -1;
+}
+
+interface TermHit {
+	fieldType: FieldType;
+	/** Best score achieved for this search term in this field.
+	 *  Stored during the "max score" pass and used to skip re-checking
+	 *  an already-best-matched term during the "thanks" pass.
+	 */
+	maxScore?: number;
+}
+
+interface ArticleScore { article: Article; score: number }
+
+/** Positions for every unique search term within every field of `article`.
+ *  Returns a map keyed by `${fieldType}#${term}` → 0-based word-index within
+ *  that field's word list, or -1 if the term is absent.
+ */
+function collectMatchPositions(
+	article: Article,
+	searchTerms: string[]
+): Map<string, number> {
+	const titleWords = article.titleWords ?? [];
+	const snippetWords = article.snippetWords ?? [];
+	const siteContentWords = article.siteContentWords ?? [];
+	const map = new Map<string, number>();
+
+	for (const term of searchTerms) {
+		for (const { fieldType, wordList, ngramList } of [
+			{ fieldType: 'title',       wordList: titleWords,       ngramList: article.titleNgrams ?? [] },
+			{ fieldType: 'snippet',     wordList: snippetWords,     ngramList: article.snippetNgrams ?? [] },
+			{ fieldType: 'siteContent', wordList: siteContentWords, ngramList: article.siteContentNgrams ?? [] },
+		] as const) {
+			const wordIdx = findWordIndex(term, wordList);
+			if (wordIdx >= 0) {
+				map.set(`${fieldType}#${term}`, wordIdx);
+				continue;
+			}
+			const ngramIdx = findNgramIndex(term, ngramList);
+			if (ngramIdx >= 0) {
+				map.set(`${fieldType}#${term}`, ngramIdx);
+			}
+		}
+	}
+
+	return map;
+}
+
+/** Score one article against `searchTerms`.
+ *
+ *  Scoring rules (applied in priority order; each search term is awarded
+ *  only its highest-scoring opportunity):
+ *
+ *  1. **Field weight**  — title ×30, snippet ×10, siteContent ×2
+ *  2. **Match type**    — phrase/ngram match = ×2.0; unigram = ×1.0
+ *  3. **Position**      — earlier matches in a field score higher
+ *                          via `positionMult(totalWords, index)` in [0.8, 1.1]
+ *  4. **Term bonus**    — each additional matching term adds 15% of the
+ *                          highest single-term score (max +45%)
+ */
+function scoreArticle(article: Article, searchTerms: string[]): number {
+	if (searchTerms.length === 0) return 0;
+
+	const titleWords = article.titleWords ?? [];
+	const snippetWords = article.snippetWords ?? [];
+	const siteContentWords = article.siteContentWords ?? [];
+
+	// Total words per field for position normalisation.
+	const fieldWordCounts: Record<string, number> = {
+		title: titleWords.length,
+		snippet: snippetWords.length,
+		siteContent: siteContentWords.length,
+	};
+
+	// Aggregate raw points per search term.
+	// We keep the best-scoring hit per term so each term only counts once.
+	const bestPerTerm = new Map<string, number>();
+	let totalUnscaled = 0;
+
+	for (const term of searchTerms) {
+		let best = 0;
+
+		for (const { fieldType, wordList, ngramList } of [
+			{ fieldType: 'title',       wordList: titleWords,       ngramList: article.titleNgrams ?? [] },
+			{ fieldType: 'snippet',     wordList: snippetWords,     ngramList: article.snippetNgrams ?? [] },
+			{ fieldType: 'siteContent', wordList: siteContentWords, ngramList: article.siteContentNgrams ?? [] },
+		] as const) {
+			const fw = FIELD_WEIGHTS[fieldType];
+			const wc = fieldWordCounts[fieldType];
+			if (fw <= 0 || wc === 0) continue;
+
+			// Exact unigram/phrase match — higher value.
+			const idx = findWordIndex(term, wordList);
+			if (idx >= 0) {
+				const raw = fw * positionMult(idx / wc);
+				best = Math.max(best, raw);
+				continue;
+			}
+
+			// N-gram / partial match — slightly lower.
+			const ngIdx = findNgramIndex(term, ngramList);
+			if (ngIdx >= 0) {
+				const raw = fw * 0.5 * positionMult(ngIdx / wc);
+				best = Math.max(best, raw);
+			}
+		}
+
+		bestPerTerm.set(term, best);
+		totalUnscaled += best;
+	}
+
+	if (totalUnscaled === 0) return 0;
+
+	// Count how many terms actually contributed (have a positive best score).
+	let matchedTerms = 0;
+	for (const v of bestPerTerm.values()) if (v > 0) matchedTerms++;
+
+	// Each additional matched term beyond the first adds 15% of the top score,
+	// capped at +45 % (i.e. three bonus terms).
+	const topScore = Math.max(...bestPerTerm.values());
+	const extraTerms = Math.min(matchedTerms - 1, 3);
+	const termBonus = 1 + (extraTerms * 0.15);
+
+	return Math.round(totalUnscaled * termBonus);
+}
+
+/** Score all articles and return them sorted by relevance score (descending). */
+function scoreAndSortArticles(articles: Article[], searchTerms: string[]): Article[] {
+	if (articles.length === 0) return articles;
+
+	const scored: ArticleScore[] = articles.map(a => ({
+		article: a,
+		score: scoreArticle(a, searchTerms),
+	}));
+
+	scored.sort((a, b) => b.score - a.score);
+	return scored.map(s => s.article);
+}
+
+// ── Search history helpers ─────────────────────────────────────────────────────
+const SEARCH_HISTORY_KEY = 'searchHistory';
+const MAX_HISTORY_ENTRIES = 500;
+
+export interface SearchHistoryEntry {
+	query: string;
+	timestamp: number;
+}
+
+/**
+ * Read the full search-history array from chrome.storage.local for this user.
+ */
+export async function readSearchHistory(userId: number): Promise<SearchHistoryEntry[]> {
+	const result = await chrome.storage.local.get(SEARCH_HISTORY_KEY) as {
+		[SEARCH_HISTORY_KEY]?: SearchHistoryEntry[];
+	};
+	return result[SEARCH_HISTORY_KEY] ?? [];
+}
+
+/**
+ * Append a new query to the user's search history, de-duplicating against the
+ * most-recent entries and capping total entries at MAX_HISTORY_ENTRIES.
+ */
+export async function saveSearchQuery(userId: number, query: string): Promise<void> {
+	if (!query.trim() || query.trim().length < 3) return;
+
+	const history = await readSearchHistory(userId);
+	const trimmed = query.trim();
+
+	// Remove the same query if it already exists so the new timestamp wins
+	const existingIdx = history.findIndex(e => e.query === trimmed);
+	if (existingIdx !== -1) {
+		history.splice(existingIdx, 1);
+	}
+
+	history.unshift({ query: trimmed, timestamp: Date.now() });
+
+	// Cap at MAX_HISTORY_ENTRIES
+	if (history.length > MAX_HISTORY_ENTRIES) {
+		history.length = MAX_HISTORY_ENTRIES;
+	}
+
+	await chrome.storage.local.set({ [SEARCH_HISTORY_KEY]: history });
+}
+
+// English stop-words from the `stopword` npm package (eng list).
+// Lowercased for case-insensitive lookup; only trailing tokens are stripped.
+const STOP_WORDS = new Set(eng.map((w: string) => w.toLowerCase()));
+
+/**
+ * If `candidate` ends with one or more stop-words, strip them off and
+ * return the cleaned string.  Returns the original string if the whole
+ * candidate is a stop word or if no trailing stop-word is found.
+ *
+ * Works on single words and multi-word phrases alike.
+ */
+function trimTrailingStopWords(candidate: string): string {
+	const tokens = candidate.toLowerCase().split(/\s+/).filter(Boolean);
+	// Walk backwards while the token is a stop word
+	while (tokens.length > 1 && STOP_WORDS.has(tokens[tokens.length - 1])) {
+		tokens.pop();
+	}
+	return tokens.join(' ');
+}
+
+// ── Autocomplete / search suggestions ─────────────────────────────────────────
+// Builds two frequency maps — one for single words and one for multi-word
+// phrases (n-grams drawn from article titles/snippets/site content).
+// Also accepts an optional searchHistory list; matching history items are
+// returned FIRST so users see their frequently-repeated phrases at the top.
+// Returns up to `limit` unique suggestions (default 200) sorted by frequency
+// descending, then alphabetically ascending.
+export async function getSearchSuggestions(
+	userId: number,
+	query: string,
+	options: { limit?: number; searchHistory?: string[] } = {}
+): Promise<string[]> {
+	const maxResults = options.limit ?? 200;
+	if (!query || query.length < 1) return [];
+
+	const lowerQuery = query.toLowerCase();
+	const allArticles = await db.articles.where('userId').equals(userId).toArray();
+
+	// word → frequency
+	const wordFreq = new Map<string, number>();
+	// phrase (space-joined n-gram) → frequency
+	const phraseFreq = new Map<string, number>();
+
+	const addWord = (w: string) => {
+		const lw = w.toLowerCase();
+		wordFreq.set(lw, (wordFreq.get(lw) || 0) + 1);
+	};
+
+	for (const article of allArticles) {
+		for (const w of article.titleWords || []) addWord(w);
+		for (const w of article.snippetWords || []) addWord(w);
+		for (const w of article.siteContentWords || []) addWord(w);
+	}
+
+	// --- Phase 1: matching search-history items go first (highest priority) ---
+	const historyMatches: string[] = [];
+	if (options.searchHistory) {
+		for (const entry of options.searchHistory) {
+			if (entry.length < 3) continue; // skip 1–2 character entries
+			if (entry.toLowerCase().startsWith(lowerQuery) && entry.toLowerCase() !== lowerQuery) {
+				historyMatches.push(entry);
+			}
+		}
+	}
+	// deduplicate while preserving insertion order
+	const seen = new Set<string>();
+	const dedupedHistory: string[] = [];
+	for (const h of historyMatches) {
+		if (!seen.has(h)) {
+			seen.add(h);
+			dedupedHistory.push(h);
+		}
+	}
+
+	// --- Phase 2: frequent words that start with the query prefix ---
+	const wordMatches: Array<{ text: string; freq: number }> = [];
+	for (const [word, freq] of wordFreq) {
+		if (word.startsWith(lowerQuery) && word !== lowerQuery) {
+			wordMatches.push({ text: word, freq });
+		}
+	}
+
+	wordMatches.sort((a, b) => {
+		if (b.freq !== a.freq) return b.freq - a.freq;
+		return a.text.localeCompare(b.text);
+	});
+
+	// --- Merge: history first, then words up to the cap ---
+	const results: string[] = [];
+	for (const h of dedupedHistory) {
+		if (results.length >= maxResults) break;
+		if (h.toLowerCase() !== lowerQuery) {
+			const cleaned = trimTrailingStopWords(h);
+			if (cleaned) {
+				results.push(cleaned);
+				seen.add(cleaned);
+			}
+		}
+	}
+	for (const w of wordMatches) {
+		if (results.length >= maxResults) break;
+		if (!seen.has(w.text)) {
+			const cleaned = trimTrailingStopWords(w.text);
+			if (cleaned) {
+				results.push(cleaned);
+				seen.add(cleaned);
+			}
+		}
+	}
+
+	return results;
 }
 
 // ── Batch count helpers ──────────────────────────────────────────────────────

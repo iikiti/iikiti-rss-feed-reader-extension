@@ -57,7 +57,7 @@ export function segmentWords(text: string, locale?: string): string[] {
 
 	for (const segment of segments) {
 		const word = segment.segment.trim().toLowerCase();
-		if (word.length >= 2 && /[a-zA-Z]/.test(word)) {
+		if (word.length >= 1 && /[a-zA-Z]/.test(word)) {
 			words.push(word);
 		}
 	}

@@ -606,15 +606,16 @@ function getDisplayContent(article: Article, index: number): string {
 	/>
 
 	<main class="flex-1 flex flex-col overflow-hidden">
-		<ReaderHeader
-			{currentTitle}
-			{sortBy}
-			bind:searchQuery
-			bind:useNgrams
-			bind:searchLanguage
-			onRefresh={refreshFeeds}
-			onSortChange={handleSortChange}
-		/>
+	<ReaderHeader
+		{currentTitle}
+		{sortBy}
+		bind:searchQuery
+		bind:useNgrams
+		bind:searchLanguage
+		userId={currentUserId ?? undefined}
+		onRefresh={refreshFeeds}
+		onSortChange={handleSortChange}
+	/>
 		<ArticleList
 			articles={filteredArticles}
 			{feeds}
