@@ -169,21 +169,15 @@ async function main() {
 	let needsRebuild = false;
 
 	if (fs.existsSync(OUTPUT_PATH)) {
-		try {
-			existingData = JSON.parse(await fs.promises.readFile(OUTPUT_PATH, 'utf-8'));
-			const stat = await fs.promises.stat(OUTPUT_PATH);
-			const age = Date.now() - stat.mtimeMs;
-			if (age < ONE_DAY_MS) {
-				console.log('Using existing build/cldr/languages.json (less than 1 day old)');
-				await fs.promises.writeFile(OUTPUT_PATH, JSON.stringify(existingData, null, 2), 'utf-8');
-				return;
-			}
-			console.log('Existing file is stale, fetching fresh data...');
-			throw new Error('Needs rebuild.');
-		} catch (e) {
-			needsRebuild = true;
+		existingData = JSON.parse(await fs.promises.readFile(OUTPUT_PATH, 'utf-8'));
+		const stat = await fs.promises.stat(OUTPUT_PATH);
+		const age = Date.now() - stat.mtimeMs;
+		if (age < ONE_DAY_MS) {
+			console.log('Using existing build/cldr/languages.json (less than 1 day old)');
+			await fs.promises.writeFile(OUTPUT_PATH, JSON.stringify(existingData, null, 2), 'utf-8');
+			return;
 		}
-	} else {
+		console.log('Existing file is stale, fetching fresh data...');
 		needsRebuild = true;
 	}
 
