@@ -139,6 +139,7 @@
 			onchange={onSortChange}
 			class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700"
 		>
+			<option value="relevance">Relevance</option>
 			<option value="pubDateDesc">Newest First</option>
 			<option value="pubDateAsc">Oldest First</option>
 			<option value="titleAsc">Title A-Z</option>

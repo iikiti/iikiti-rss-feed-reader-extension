@@ -1,4 +1,4 @@
-import { db, type Feed as FeedType, type ArticleCounts } from '$lib/db';
+import { db, type Feed as FeedType } from '$lib/db';
 import { Entity, clearFormError, setFormLoading, type FormState } from './Entity';
 
 export interface FeedFormState extends FormState {
@@ -43,7 +43,7 @@ export class Feed extends Entity<FeedType> {
 			form.error = 'Please enter a feed URL';
 			return false;
 		}
-		
+
 		try {
 			const parsed = new URL(form.url);
 			if (!['http:', 'https:'].includes(parsed.protocol)) {
@@ -68,15 +68,16 @@ export class Feed extends Entity<FeedType> {
 					form.error = 'This feed already exists';
 					return false;
 				}
-				
+
 				const addedId = await db.feeds.add({
 					userId,
 					url: form.url,
 					title: form.title,
 					folderId: form.folderId || undefined
 				});
-				
+
 				this.data.id = addedId as number;
+				chrome.runtime.sendMessage('refresh-feed', { "feed": this });
 				return true;
 			}
 		} catch (err: any) {

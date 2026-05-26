@@ -1,4 +1,4 @@
-import Dexie, { type Table } from 'dexie';
+import Dexie, { type Table, type Transaction } from 'dexie';
 
 import { eng } from 'stopword';
 import { segmentWords, generateAllNgrams, getSegmenter, normalizeLanguage } from './text-segmenter';
@@ -38,12 +38,6 @@ export interface Article {
 	author?: string;
 	image?: string;
 	language?: string;
-	titleWords?: string[];
-	snippetWords?: string[];
-	siteContentWords?: string[];
-	titleNgrams?: string[];
-	snippetNgrams?: string[];
-	siteContentNgrams?: string[];
 }
 
 export interface Folder {
@@ -61,14 +55,92 @@ export interface View {
 	filterJson: string;
 }
 
+/** One row in the shared words dictionary. word is the unique text key. */
+export interface Word {
+	word: string;
+	lang: string;
+}
+
+/** One row in the shared n-grams dictionary. ngram is the unique text key. */
+export interface Ngram {
+	ngram: string;
+	lang: string;
+}
+
+export enum FieldType {
+	title,
+	snippet,
+	siteContent
+}
+
+/** Link row – belongs a single (word, article, field) triple.
+ *  The composite partial index `[articleId+fieldType]` makes it O(1)
+ *  to retrieve all words belonging to one article for one field. */
+export interface ArticleWordLink {
+	articleId: number;
+	wordId: string;
+	fieldType: FieldType;
+	offset: number;
+}
+
+/** Link row – belongs a single (ngram, article, field) triple.
+ * 同一个 k-gram 同一篇文章同一字段只存一条. */
+export interface ArticleNgramLink {
+	articleId: number;
+	ngramId: string;
+	fieldType: FieldType;
+	offset: number;
+}
+
+const onCreatingOrUpdatingArticle =
+	function (
+		this: { onsuccess: Function, onerror: Function },
+		primaryKey: undefined | number | string,
+		obj: Article,
+		transaction: Transaction,
+		modifications: undefined | {}
+	) {
+		this.onsuccess = async function (id: number | string) {
+			const savedArticle = await db.articles.get(id);
+			if (!savedArticle) {
+				throw new Error('Article is missing: ' + id);
+			}
+			id = Number(id);
+			transaction.on("complete", function () {
+				console.info(`Successfully added article with id & guid`, id, savedArticle);
+				setArticleSearchIndex(id, {
+					title: savedArticle.title,
+					snippet: savedArticle.snippet,
+					siteContent: savedArticle.siteContent,
+					language: savedArticle.language,
+				});
+			});
+		};
+		if (!modifications) {
+			return db.articles.get({ "guid": obj.guid }).then((existing) => {
+				if (existing) {
+					console.warn(`Article with guid ${existing.guid} already exists, skipping.`);
+					return null;
+				}
+				console.warn(`Existing?`, existing);
+			});
+		} else {
+			return {};
+		}
+	};
+
 export class IikitiDB extends Dexie {
 	users!: Table<User>;
 	feeds!: Table<Feed>;
 	articles!: Table<Article>;
 	folders!: Table<Folder>;
 	views!: Table<View>;
+	words!: Table<Word>;
+	ngrams!: Table<Ngram>;
+	articleWords!: Table<ArticleWordLink>;
+	articleNgrams!: Table<ArticleNgramLink>;
 
-constructor() {
+	constructor() {
 		super('iikiti');
 		// Version 1: Original schema (no users)
 		// Version 2: Added views
@@ -81,19 +153,318 @@ constructor() {
 		// Version 9: Added compound indexes [userId+pubDate] and [userId+title] for efficient
 		//            per-user sorted pagination without loading all rows into memory
 		// Version 10: Added language field to articles and feeds
-		this.version(10).stores({
-			users: '++id, &name',
-			feeds: '++id, userId, &url, folderId, [userId+order]',
-			articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title, [userId+pubDate], [userId+title], language',
-			folders: '++id, userId, [userId+name], parentId, [userId+order]',
-			views: '++id, userId, &name'
+		// Version 11: Normalised word/ngram storage into shared dictionary tables
+		//             with articleWordLinks / articleNgrams junction tables, and
+		//             removed the inline word/ngram arrays from the Article schema.
+		this.version(12)
+			.stores({
+				users: '++id, &name',
+				feeds: '++id, userId, &url, folderId, [userId+order]',
+				articles: '++id, userId, feedId, &guid, pubDate, [read+feedId], starred, title, [userId+pubDate], [userId+title], language',
+				folders: '++id, userId, [userId+name], parentId, [userId+order]',
+				views: '++id, userId, &name',
+				words: '&word, lang',
+				ngrams: '&ngram, lang',
+				articleWords: '++id, [articleId+fieldType], [articleId+fieldType+wordId+offset], [wordId]',
+				articleNgrams: '++id, [articleId+fieldType], [articleId+fieldType+ngramId+offset], [ngramId]',
+			});
+
+		// Hook for when new articles are added to add the search index words/ngrams automatically.
+		this.articles.hook('creating', function (
+			primaryKey,
+			obj: Article,
+			transaction: Transaction
+		) {
+			onCreatingOrUpdatingArticle.call(
+				this as { onsuccess: Function, onerror: Function },
+				primaryKey as undefined | number | string,
+				obj,
+				transaction,
+				undefined
+			);
+		});
+		this.articles.hook('updating', function (
+			modifications,
+			primaryKey,
+			obj: Article,
+			transaction: Transaction
+		) {
+			onCreatingOrUpdatingArticle.call(
+				this as { onsuccess: Function, onerror: Function },
+				primaryKey as undefined | number | string,
+				obj,
+				transaction,
+				modifications
+			);
 		});
 	}
 }
 
 export const db = new IikitiDB();
 
-// User management functions
+// ── Search index helpers ───────────────────────────────────────────────────────
+
+/**
+ * Deletes all search-index rows (words, ngrams, and their linker entries)
+ * belonging to `articleId`. Safe to call on a non-existent article id.
+ */
+async function deleteArticleSearchIndex(articleId: number): Promise<void> {
+	await db.articleWords.where('articleId').equals(articleId).delete();
+	await db.articleNgrams.where('articleId').equals(articleId).delete();
+}
+
+interface SearchIndexInput {
+	title: string;
+	snippet: string;
+	siteContent?: string;
+	language?: string;
+}
+
+interface ComputedSearchIndex {
+	wordsByField: Record<string, string[]>;
+	ngramsByField: Record<string, string[]>;
+	language: string;
+}
+
+/**
+ * Computes the tokenised word lists and n-gram lists for each searchable field.
+ * Does **not** touch the database – call `saveArticleSearchIndex` to persist.
+ */
+function computeSearchIndex(
+	{ title, snippet, siteContent, language }: SearchIndexInput
+): ComputedSearchIndex {
+	const normalizedLang = normalizeLanguage(language);
+	const titleWords = segmentWords(title, normalizedLang);
+	const snippetWords = segmentWords(snippet, normalizedLang);
+	const siteContentWords = siteContent ? segmentWords(siteContent, normalizedLang) : [];
+
+	const titleNgrams = generateAllNgrams(titleWords, 3);
+	const snippetNgrams = generateAllNgrams(snippetWords, 3);
+	const siteContentNgrams = generateAllNgrams(siteContentWords, 3);
+
+	return {
+		wordsByField: { title: titleWords, snippet: snippetWords, siteContent: siteContentWords },
+		ngramsByField: { title: titleNgrams, snippet: snippetNgrams, siteContent: siteContentNgrams },
+		language: normalizedLang,
+	};
+}
+
+/**
+ * Persists the search index for `articleId` into the normalised dictionary tables.
+ * Replaces whatever search index this article previously held.
+ */
+export async function setArticleSearchIndex(articleId: number, input: SearchIndexInput): Promise<void> {
+	const index = computeSearchIndex(input);
+	const langs = index.language;
+	console.info('[setArticleSearchIndex]', { articleId, titleWords: index.wordsByField.title.length, snippetWords: index.wordsByField.snippet.length, siteContentWords: index.wordsByField.siteContent.length, language: langs });
+
+	if (!articleId) {
+		throw new Error('Article ID is invalid');
+	} else if (false === (typeof articleId === 'number')) {
+		throw new Error('Article ID is not a number');
+	}
+
+	// Collect the unique word IDs per field for this article.
+	const wordEntries: ArticleWordLink[] = [];
+	for (const [fieldType, words] of Object.entries(index.wordsByField) as Array<[string, string[]]>) {
+		words.forEach((w, offset) => {
+			if (false == (fieldType in FieldType)) {
+				throw new Error('Invalid field type enum key ' + fieldType.toString());
+			}
+			wordEntries.push({
+				"articleId": articleId,
+				"wordId": w,
+				"fieldType": FieldType[fieldType as keyof typeof FieldType],
+				"offset": offset
+			});
+		});
+	}
+
+	// Collect the unique ngram IDs per field.
+	const ngramEntries: ArticleNgramLink[] = [];
+	for (const [fieldType, ngrams] of Object.entries(index.ngramsByField) as Array<[string, string[]]>) {
+		ngrams.forEach((n, offset) => {
+			if (false == (fieldType in FieldType)) {
+				throw new Error('Invalid field type enum key ' + fieldType.toString());
+			}
+			ngramEntries.push({
+				"articleId": articleId,
+				"ngramId": n,
+				"fieldType": FieldType[fieldType as keyof typeof FieldType],
+				"offset": offset
+			});
+		});
+	}
+
+	console.info('[setArticleSearchIndex]', { articleId, wordEntries: wordEntries.length, ngramEntries: ngramEntries.length });
+
+	await db.transaction('rw', [db.words, db.ngrams, db.articleWords, db.articleNgrams], async () => {
+		// Replace existing linker rows for this article
+		await deleteArticleSearchIndex(articleId);
+
+		// Upsert dictionary entries
+		for (const w of new Set(wordEntries.map(e => e.wordId))) {
+			await db.words.put({ word: w, lang: langs });
+		}
+		for (const n of new Set(ngramEntries.map(e => e.ngramId))) {
+			await db.ngrams.put({ ngram: n, lang: langs });
+		}
+
+		// Insert linker rows
+		if (wordEntries.length) await db.articleWords.bulkPut(wordEntries);
+		if (ngramEntries.length) await db.articleNgrams.bulkPut(ngramEntries);
+	});
+
+	console.info('[setArticleSearchIndex] done', { articleId });
+}
+
+/**
+ * Deletes *all* link rows for `articleId` and clears back-references from
+ * the shared word/ngram dictionaries. Returns true when the article existed.
+ */
+export async function deleteArticle(articleId: number): Promise<boolean> {
+	const article = await db.articles.get(articleId);
+	if (!article) return false;
+
+	await db.transaction('rw', [db.articles, db.articleWords, db.articleNgrams, db.words, db.ngrams], async () => {
+		await db.articles.delete(articleId);
+		await db.articleWords.where('articleId').equals(articleId).delete();
+		await db.articleNgrams.where('articleId').equals(articleId).delete();
+
+		// Purge dictionary entries that are no longer referenced by any linker row.
+		const liveWordIds = new Set((await db.articleWords.toArray()).map(aw => aw.wordId));
+		const liveNgramIds = new Set((await db.articleNgrams.toArray()).map(an => an.ngramId));
+
+		for (const w of await db.words.toArray()) {
+			if (!liveWordIds.has(w.word)) await db.words.delete(w.word);
+		}
+		for (const n of await db.ngrams.toArray()) {
+			if (!liveNgramIds.has(n.ngram)) await db.ngrams.delete(n.ngram);
+		}
+	});
+	return true;
+}
+
+// ── Word / n-gram data helpers ─────────────────────────────────────────────────
+
+/** Fetch an article's tokenised word lists ordered by field, then reversed. */
+async function getArticleWordLists(article: Article): Promise<Record<FieldType, string[]>> {
+	const fetchFieldWords = async (fieldType: FieldType): Promise<string[]> => {
+		return db.articleWords
+			.where('[articleId+fieldType]').equals([article.id!, fieldType])
+			.toArray()
+			.then(links => links.map(l => l.wordId))
+			.then(wordSheets => {
+				// words table holds the canonical record for each word; join in bulk.
+				if (wordSheets.length === 0) return [];
+				return Promise.all(wordSheets.map(w => db.words.get(w).then(r => r?.word ?? w)))
+					.then(words => words);
+			});
+	};
+	const typedWordLists: Record<FieldType, string[]> = {} as Record<FieldType, string[]>;
+	await Promise.all((Object.values(FieldType) as FieldType[]).map(async (fieldType) => {
+		typedWordLists[fieldType] = await fetchFieldWords(fieldType);
+	}));
+	return typedWordLists;
+}
+
+// Maximum position considered for scoring position bonus
+const MAX_POSITIONS: Record<FieldType, number> = {} as Record<FieldType, number>;
+
+await Promise.all((Object.values(FieldType) as FieldType[]).map(async (fieldType) => {
+	MAX_POSITIONS[fieldType] = 0;
+}));
+
+/**
+ * Populates MAX_POSITIONS from the article's word lists so positionMult uses
+ * per-field word counts rather than the full searchable token length.
+ */
+async function getArticleWordCounts(article: Article): Promise<Record<FieldType, number>> {
+	const lists = await getArticleWordLists(article);
+	let typedLengths: Record<FieldType, number> = {} as Record<FieldType, number>;
+	(Object.values(FieldType) as FieldType[]).forEach((fieldType) => {
+		typedLengths[fieldType] = lists[fieldType].length;
+	});
+	return typedLengths;
+}
+
+/**
+ * Builds a helper object whose `getOccurrence(fieldType, term)` method returns
+ * the first word position in `fieldType` or -1 when absent, while n-gram
+ * occurrences are retrieved via `getNgramOccurrence(fieldType, ngram)`.
+ *
+ * Rather than eagerly loading everything we look up positions on demand
+ * from the linker tables; the article-level filter (hasWordLinks / hasNgramLinks)
+ * eliminates the vast majority of articles before any per-term position lookup occurs.
+ */
+async function getFieldOccurrenceHints(article: Article): Promise<{
+	wordSheet: Map<string, FieldType[]>;   // wordId → [fieldType, …]
+	ngramSheet: Map<string, FieldType[]>;  // ngramId → [fieldType, …]
+	wordPositions: Map<FieldType, Map<string, number>>;   // fieldType#wordId → pos
+	ngramPositions: Map<FieldType, Map<string, number>>;  // fieldType#ngramId → pos
+}> {
+	// Pre-load words per field in order so we can build a wordId → [fieldType] sheet.
+	const rawWords = await db.articleWords.where('articleId').equals(article.id!).toArray();
+	const rawNgrams = await db.articleNgrams.where('articleId').equals(article.id!).toArray();
+
+	// Build field-type lookup maps: "wordId → set of fieldTypes that contain it"
+	const wordFieldMap = new Map<string, Set<FieldType>>();
+	for (const w of rawWords) {
+		const s = wordFieldMap.get(w.wordId);
+		if (s) { s.add(w.fieldType); }
+		else { wordFieldMap.set(w.wordId, new Set([w.fieldType])); }
+	}
+	// Build per-field word arrays (ordered by position, i.e. by DB id)
+	const fieldWordArrays = new Map<FieldType, string[]>();
+	(Object.values(FieldType) as FieldType[]).forEach((fieldType) => {
+		fieldWordArrays.set(fieldType, rawWords.filter(w => w.fieldType === fieldType).map(w => w.wordId));
+	});
+
+	// Build position maps: fieldType#wordId → first array index
+	const wordPosMap = new Map<FieldType, Map<string, number>>();
+	for (const [field, idsInField] of fieldWordArrays) {
+		const perField = new Map<string, number>();
+		for (let i = 0; i < idsInField.length; i++) {
+			if (!perField.has(idsInField[i])) perField.set(idsInField[i], i);
+		}
+		wordPosMap.set(field, perField);
+	}
+
+	// Ngram field-type lookup map
+	const ngramFieldMap = new Map<string, FieldType[]>();
+	for (const n of rawNgrams) {
+		const s = ngramFieldMap.get(n.ngramId);
+		if (!s) { continue; }
+		s.push(n.fieldType);
+		ngramFieldMap.set(n.ngramId, s);
+	}
+
+	// Build per-field ngram arrays
+	const fieldNgramArrays = new Map<FieldType, string[]>();
+	(Object.values(FieldType) as FieldType[]).forEach((fieldType) => {
+		fieldNgramArrays.set(fieldType, rawNgrams.filter(n => n.fieldType === fieldType).map(n => n.ngramId));
+	});
+	// Build position maps for ngrams
+	const ngramPosMap = new Map<FieldType, Map<string, number>>();
+	for (const [field, ngramsInField] of fieldNgramArrays) {
+		const perField = new Map<string, number>();
+		for (let i = 0; i < ngramsInField.length; i++) {
+			if (!perField.has(ngramsInField[i])) perField.set(ngramsInField[i], i);
+		}
+		ngramPosMap.set(field, perField);
+	}
+
+	const wordSheet = new Map<string, FieldType[]>();
+	for (const [wordId, fields] of wordFieldMap) wordSheet.set(wordId, [...fields]);
+
+	const ngramSheet = new Map<string, FieldType[]>();
+	for (const [ngramId, fields] of ngramFieldMap) ngramSheet.set(ngramId, [...fields]);
+
+	return { wordSheet, ngramSheet, wordPositions: wordPosMap, ngramPositions: ngramPosMap };
+}
+
+// ── User management functions ──────────────────────────────────────────────────
+
 export async function getCurrentUserId(): Promise<number> {
 	const result = await chrome.storage.local.get('currentUserId') as { currentUserId?: number };
 	if (result.currentUserId) {
@@ -129,7 +500,12 @@ export async function createUser(name: string): Promise<number> {
 }
 
 export async function deleteUser(userId: number): Promise<void> {
-	// Delete all user data
+	// Clean up all related search-index data
+	const userArticles = await db.articles.where('userId').equals(userId).toArray();
+	for (const a of userArticles) {
+		await deleteArticleSearchIndex(a.id!);
+	}
+
 	await db.feeds.where('userId').equals(userId).delete();
 	await db.articles.where('userId').equals(userId).delete();
 	await db.folders.where('userId').equals(userId).delete();
@@ -182,7 +558,7 @@ export async function updateFolderOrder(folderId: number, order: number): Promis
 }
 
 // Sort options for articles
-export type SortOption = 'pubDateDesc' | 'pubDateAsc' | 'titleAsc' | 'titleDesc';
+export type SortOption = 'pubDateDesc' | 'pubDateAsc' | 'titleAsc' | 'titleDesc' | 'relevance';
 
 export async function getUserArticlesSorted(userId: number, sortBy: SortOption = 'pubDateDesc'): Promise<Article[]> {
 	// Use compound index to avoid loading all articles and filtering in JS
@@ -195,16 +571,18 @@ export async function getUserArticlesSorted(userId: number, sortBy: SortOption =
 			return db.articles.where('[userId+title]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).toArray();
 		case 'titleDesc':
 			return db.articles.where('[userId+title]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).reverse().toArray();
+		case 'relevance':
 		default:
 			return db.articles.where('[userId+pubDate]').between([userId, Dexie.minKey], [userId, Dexie.maxKey]).reverse().toArray();
 	}
 }
 
 // Get paginated articles with optional filtering.
-// For the unfiltered case (no feedId/folderId/read/starred) the compound index
+// For the unfiltered case (no feedId/folderId/read/starred/searchQuery) the compound index
 // [userId+pubDate] / [userId+title] is used for DB-level sorting and pagination,
 // which avoids loading the entire article set into memory.
-// When filters are present the data is loaded for that user and filtered in JS.
+// When a search query is present, results are sorted by relevance score.
+// When other filters are present the data is loaded for that user and filtered in JS.
 export async function getPaginatedArticles(
 	userId: number,
 	options: {
@@ -215,11 +593,30 @@ export async function getPaginatedArticles(
 		sortBy?: SortOption;
 		limit?: number;
 		offset?: number;
+		searchQuery?: string;
 	} = {}
 ): Promise<{ articles: Article[]; hasMore: boolean }> {
 	const limit = options.limit ?? 25;
 	const offset = options.offset ?? 0;
 	const sortBy = options.sortBy ?? 'pubDateDesc';
+
+	const hasSearch = !!options.searchQuery?.trim();
+
+	// ── Search path ─────────────────────────────────────────────────────────
+	// When a search query is present (regardless of sortBy), use relevance-ranked search.
+	if (hasSearch) {
+		const searchOptions: SearchOptions = {
+			limit,
+			offset,
+			useNgrams: true,
+			language: undefined,
+		};
+		if (options.feedId !== undefined) searchOptions.feedId = options.feedId;
+		if (options.read !== undefined) searchOptions.read = options.read;
+		if (options.starred !== undefined) searchOptions.starred = options.starred;
+		const results = await searchArticles(userId, options.searchQuery!.trim(), searchOptions);
+		return { articles: results.articles, hasMore: results.hasMore };
+	}
 
 	const hasFilters =
 		options.feedId !== undefined ||
@@ -260,7 +657,6 @@ export async function getPaginatedArticles(
 			const childIds = feedsInFolder
 				.filter(f => f.folderId === parentId)
 				.map(f => f.id!);
-			// re-use feedsInFolder as a proxy; actual folder recursion is below
 			const childFolders = feedsInFolder; // unused — see below
 			void childFolders;
 			return childIds;
@@ -288,10 +684,10 @@ export async function getPaginatedArticles(
 	articles.sort((a, b) => {
 		switch (sortBy) {
 			case 'pubDateDesc': return (b.pubDate || 0) - (a.pubDate || 0);
-			case 'pubDateAsc':  return (a.pubDate || 0) - (b.pubDate || 0);
-			case 'titleAsc':    return (a.title || '').localeCompare(b.title || '');
-			case 'titleDesc':   return (b.title || '').localeCompare(a.title || '');
-			default:            return (b.pubDate || 0) - (a.pubDate || 0);
+			case 'pubDateAsc': return (a.pubDate || 0) - (b.pubDate || 0);
+			case 'titleAsc': return (a.title || '').localeCompare(b.title || '');
+			case 'titleDesc': return (b.title || '').localeCompare(a.title || '');
+			default: return (b.pubDate || 0) - (a.pubDate || 0);
 		}
 	});
 
@@ -309,11 +705,193 @@ export interface SearchOptions {
 	language?: string;
 }
 
+export interface SearchResult {
+	articles: Article[];
+	hasMore: boolean;
+}
+
+/** Maximum candidate pool size during Phase 1 — keeps memory bounded even
+ *  if the full-text index is large. */
+const SEARCH_CANDIDATE_CAP = 500;
+
+/** Positions 0-based within a field; earlier words get a small bonus via
+ *  `positionMult`. Returns a multiplier in [0.8, 1.1]. */
+function positionMult(fraction: number): number {
+	return 1.1 - 0.3 * fraction; // fraction 0 → 1.1, fraction 1 → 0.8
+}
+
+interface ArticleScore { article: Article; score: number }
+
+/** Phase 1 helper – for each search term look up matching word/ngram IDs in
+ *  the shared dictionary, then gather all articleIds that have a linker row
+ *  for at least one term. */
+async function collectCandidateArticleIds(
+	userId: number,
+	searchTerms: string[],
+	useNgrams: boolean,
+	options: SearchOptions,
+	candidateCap: number = SEARCH_CANDIDATE_CAP,
+): Promise<Set<number>> {
+	if (searchTerms.length === 0) return new Set();
+
+	// 1. Matching word IDs from the shared dictionary
+	const matchedWordIds = (await Promise.all(
+		searchTerms.map(term => db.words.get(term).then(w => w?.word))
+	)).filter((w): w is string => !!w);
+
+	// 2. Matching ngram IDs from the shared dictionary
+	const matchedNgramIds: string[] = [];
+	if (useNgrams) {
+		const ids = await Promise.all(
+			searchTerms.map(term => db.ngrams.get(term).then(n => n?.ngram))
+		);
+		for (const n of ids) if (n) matchedNgramIds.push(n);
+	}
+
+	const articleIds = new Set<number>();
+	let count = 0;
+
+	for (const wordId of matchedWordIds) {
+		const wordLinks = await db.articleWords
+			.where('wordId').equals(wordId)
+			.toArray();
+		for (const link of wordLinks) {
+			if (!articleIds.has(link.articleId)) {
+				articleIds.add(link.articleId);
+				count++;
+			}
+		}
+		if (count >= candidateCap) return articleIds;
+	}
+
+	if (useNgrams) {
+		for (const ngramId of matchedNgramIds) {
+			const ngramLinks = await db.articleNgrams
+				.where('ngramId').equals(ngramId)
+				.toArray();
+			for (const link of ngramLinks) {
+				if (!articleIds.has(link.articleId)) {
+					articleIds.add(link.articleId);
+					count++;
+				}
+			}
+			if (count >= candidateCap) return articleIds;
+		}
+	}
+
+	return articleIds;
+}
+
+/** Phase 2 helper – score every candidate article against searchTerms.
+ *  Resolves wordIds → string tokens from the `words` dictionary on demand
+ *  and reads ngram linker rows only when ngram matching is enabled.
+ */
+async function scoreCandidateArticles(
+	articles: Article[],
+	searchTerms: string[],
+	useNgrams: boolean,
+): Promise<ArticleScore[]> {
+	const FIELD_WEIGHTS: Record<FieldType, number> = {
+		[FieldType.title]: 30,
+		[FieldType.snippet]: 10,
+		[FieldType.siteContent]: 2,
+	};
+
+	/** Resolve wordIds → their plain-text tokens, reading each word dict
+	 *  entry as needed but avoiding repeated single-row reads. */
+	async function resolveWordIds(articleId: number): Promise<Map<string, string>> {
+		const links = await db.articleWords
+			.where('articleId').equals(articleId)
+			.toArray();
+		const dict = new Map<string, string>();
+		for (const link of links) dict.set(link.wordId, link.wordId);
+		return dict;
+	}
+
+	function ngramPosMatch(ngramsInField: string[], ngram: string): number {
+		if (!ngramsInField.length) return -1;
+		const tokens = ngram.split(' ');
+		for (let i = 0; i <= ngramsInField.length - tokens.length; i++) {
+			let ok = true;
+			for (let j = 0; j < tokens.length; j++) {
+				if (ngramsInField[i + j] !== tokens[j]) { ok = false; break; }
+			}
+			if (ok) return i;
+		}
+		return -1;
+	}
+
+	return Promise.all(articles.map(async article => {
+		const wordDict: Map<string, string> = await resolveWordIds(article.id!);
+		const wordCounts = await getArticleWordCounts(article);
+
+		let cachedNgramArrays: Record<FieldType, string[]> = {} as Record<FieldType, string[]>;
+
+		(Object.values(FieldType) as FieldType[]).forEach((fieldType) => {
+			cachedNgramArrays[fieldType] = [];
+		});
+
+		let totalUnscaled = 0;
+		const bestPerTerm = new Map<string, number>();
+
+		for (const term of searchTerms) {
+			let best = 0;
+
+			await Promise.all((Object.values(FieldType) as FieldType[]).map(async (fieldType) => {
+				const fw = FIELD_WEIGHTS[fieldType];
+				const wc = wordCounts[fieldType];
+				if (fw <= 0 || wc === 0) return;
+
+				const wordsInField = (await db.articleWords
+					.where('[articleId+fieldType]')
+					.equals([article.id!, fieldType])
+					.toArray())
+					.map(l => l.wordId);
+
+				// Exact unigram match
+				const wordIdx = wordsInField.findIndex(wid => wordDict.get(wid) === term);
+				if (wordIdx >= 0) {
+					const raw = fw * positionMult(wordIdx / wc);
+					best = Math.max(best, raw);
+					return;
+				}
+
+				// Ngram / partial match
+				if (useNgrams) {
+					const rawNgrams = await db.articleNgrams
+						.where('articleId').equals(article.id!)
+						.toArray();
+					for (const n of rawNgrams) cachedNgramArrays![n.fieldType].push(n.ngramId);
+					const ngIdx = ngramPosMatch(cachedNgramArrays[fieldType], term);
+					if (ngIdx >= 0) {
+						const raw = fw * 0.5 * positionMult(ngIdx / wc);
+						best = Math.max(best, raw);
+					}
+				}
+			}));
+
+			bestPerTerm.set(term, best);
+			totalUnscaled += best;
+		}
+
+		if (totalUnscaled === 0) return { article, score: 0 };
+
+		let matchedTerms = 0;
+		for (const v of bestPerTerm.values()) if (v > 0) matchedTerms++;
+
+		const topScore = Math.max(...bestPerTerm.values());
+		const extraTerms = Math.min(matchedTerms - 1, 3);
+		const termBonus = 1 + (extraTerms * 0.15);
+
+		return { article, score: Math.round(totalUnscaled * termBonus) };
+	}));
+}
+
 export async function searchArticles(
 	userId: number,
 	query: string,
 	options: SearchOptions = {}
-): Promise<Article[]> {
+): Promise<SearchResult> {
 	const limit = options.limit ?? 25;
 	const offset = options.offset ?? 0;
 	const useNgrams = options.useNgrams ?? true;
@@ -326,228 +904,53 @@ export async function searchArticles(
 			.reverse();
 
 		if (options.feedId !== undefined) coll = coll.and(a => a.feedId === options.feedId);
-		if (options.read !== undefined)   coll = coll.and(a => a.read === options.read);
+		if (options.read !== undefined) coll = coll.and(a => a.read === options.read);
 		if (options.starred !== undefined) coll = coll.and(a => a.starred === options.starred);
 
-		return coll.offset(offset).limit(limit).toArray();
+		const articles = await coll.offset(offset).limit(limit + 1).toArray();
+		return { articles: articles.slice(0, limit), hasMore: articles.length > limit };
 	}
 
 	const words = segmentWords(query, searchLocale);
 	const searchTerms = useNgrams ? [...new Set([...words, ...generateAllNgrams(words, 3)])] : words;
 
 	if (searchTerms.length === 0) {
-		return [];
+		return { articles: [], hasMore: false };
 	}
 
-	let articles = await db.articles.where('userId').equals(userId).toArray();
+	// ── Phase 1: load candidate articles ─────────────────────────────────────
+	const allUserArticles = await db.articles.where('userId').equals(userId).toArray();
 
-	if (options.feedId !== undefined) {
-		articles = articles.filter(a => a.feedId === options.feedId);
-	}
-	if (options.read !== undefined) {
-		articles = articles.filter(a => a.read === options.read);
-	}
-	if (options.starred !== undefined) {
-		articles = articles.filter(a => a.starred === options.starred);
-	}
-
-	const matchingArticles = articles.filter(article => {
-		const searchableFields = [
-			...(article.titleWords || []),
-			...(article.snippetWords || []),
-			...(article.siteContentWords || [])
-		];
-		if (useNgrams) {
-			searchableFields.push(
-				...(article.titleNgrams || []),
-				...(article.snippetNgrams || []),
-				...(article.siteContentNgrams || [])
-			);
-		}
-		return searchTerms.some(term =>
-			searchableFields.some(field => field.includes(term))
-		);
-	});
-
-	return scoreAndSortArticles(matchingArticles, searchTerms)
-		.slice(offset, offset + limit);
-}
-
-// ── Relevance scoring helpers ──────────────────────────────────────────────────
-
-type FieldType = 'title' | 'snippet' | 'siteContent';
-
-const FIELD_WEIGHTS: Record<FieldType, number> = {
-	title: 30,
-	snippet: 10,
-	siteContent: 2,
-};
-
-/** Scaled position bonus: matches earlier in the field score higher.
- *  Returns a multiplier in [0.8, 1.1]: words at the very start get +10%,
- *  words at the very end get −20%.
- */
-function positionMult(fraction: number): number {
-	return 1.1 - 0.3 * fraction; // fraction 0 → 1.1, fraction 1 → 0.8
-}
-
-/** Find the index of `term` (lowercase) among the knowntokens of a field,
- *  or return -1 if not found.  Used for single-word lookups.
- */
-function findWordIndex(term: string, wordList: string[]): number {
-	return wordList.indexOf(term);
-}
-
-/** Find the starting word index of the n-gram `ngram` within `wordList`.
- *  Returns -1 if the n-gram sequence does not appear at that position.
- */
-function findNgramIndex(ngram: string, wordList: string[]): number {
-	if (wordList.length === 0) return -1;
-	const tokens = ngram.split(' ');
-	for (let i = 0; i <= wordList.length - tokens.length; i++) {
-		let ok = true;
-		for (let j = 0; j < tokens.length; j++) {
-			if (wordList[i + j] !== tokens[j]) { ok = false; break; }
-		}
-		if (ok) return i;
-	}
-	return -1;
-}
-
-interface TermHit {
-	fieldType: FieldType;
-	/** Best score achieved for this search term in this field.
-	 *  Stored during the "max score" pass and used to skip re-checking
-	 *  an already-best-matched term during the "thanks" pass.
-	 */
-	maxScore?: number;
-}
-
-interface ArticleScore { article: Article; score: number }
-
-/** Positions for every unique search term within every field of `article`.
- *  Returns a map keyed by `${fieldType}#${term}` → 0-based word-index within
- *  that field's word list, or -1 if the term is absent.
- */
-function collectMatchPositions(
-	article: Article,
-	searchTerms: string[]
-): Map<string, number> {
-	const titleWords = article.titleWords ?? [];
-	const snippetWords = article.snippetWords ?? [];
-	const siteContentWords = article.siteContentWords ?? [];
-	const map = new Map<string, number>();
-
-	for (const term of searchTerms) {
-		for (const { fieldType, wordList, ngramList } of [
-			{ fieldType: 'title',       wordList: titleWords,       ngramList: article.titleNgrams ?? [] },
-			{ fieldType: 'snippet',     wordList: snippetWords,     ngramList: article.snippetNgrams ?? [] },
-			{ fieldType: 'siteContent', wordList: siteContentWords, ngramList: article.siteContentNgrams ?? [] },
-		] as const) {
-			const wordIdx = findWordIndex(term, wordList);
-			if (wordIdx >= 0) {
-				map.set(`${fieldType}#${term}`, wordIdx);
-				continue;
-			}
-			const ngramIdx = findNgramIndex(term, ngramList);
-			if (ngramIdx >= 0) {
-				map.set(`${fieldType}#${term}`, ngramIdx);
-			}
-		}
+	let articlePool: Article[];
+	if (options.feedId !== undefined || options.read !== undefined || options.starred !== undefined) {
+		articlePool = allUserArticles.filter(a => {
+			if (options.feedId !== undefined && a.feedId !== options.feedId) return false;
+			if (options.read !== undefined && a.read !== options.read) return false;
+			if (options.starred !== undefined && a.starred !== options.starred) return false;
+			return true;
+		});
+	} else {
+		articlePool = allUserArticles;
 	}
 
-	return map;
-}
+	// Use dictionary lookups to find candidate IDs -> filter pool
+	const candidateSet = await collectCandidateArticleIds(
+		userId,
+		searchTerms,
+		useNgrams,
+		options,
+		articlePool.length + 1,  // cap at pool size
+	);
 
-/** Score one article against `searchTerms`.
- *
- *  Scoring rules (applied in priority order; each search term is awarded
- *  only its highest-scoring opportunity):
- *
- *  1. **Field weight**  — title ×30, snippet ×10, siteContent ×2
- *  2. **Match type**    — phrase/ngram match = ×2.0; unigram = ×1.0
- *  3. **Position**      — earlier matches in a field score higher
- *                          via `positionMult(totalWords, index)` in [0.8, 1.1]
- *  4. **Term bonus**    — each additional matching term adds 15% of the
- *                          highest single-term score (max +45%)
- */
-function scoreArticle(article: Article, searchTerms: string[]): number {
-	if (searchTerms.length === 0) return 0;
+	// Intersect with the filtered pool
+	const candidates = articlePool.filter(a => a.id !== undefined && candidateSet.has(a.id!));
 
-	const titleWords = article.titleWords ?? [];
-	const snippetWords = article.snippetWords ?? [];
-	const siteContentWords = article.siteContentWords ?? [];
-
-	// Total words per field for position normalisation.
-	const fieldWordCounts: Record<string, number> = {
-		title: titleWords.length,
-		snippet: snippetWords.length,
-		siteContent: siteContentWords.length,
-	};
-
-	// Aggregate raw points per search term.
-	// We keep the best-scoring hit per term so each term only counts once.
-	const bestPerTerm = new Map<string, number>();
-	let totalUnscaled = 0;
-
-	for (const term of searchTerms) {
-		let best = 0;
-
-		for (const { fieldType, wordList, ngramList } of [
-			{ fieldType: 'title',       wordList: titleWords,       ngramList: article.titleNgrams ?? [] },
-			{ fieldType: 'snippet',     wordList: snippetWords,     ngramList: article.snippetNgrams ?? [] },
-			{ fieldType: 'siteContent', wordList: siteContentWords, ngramList: article.siteContentNgrams ?? [] },
-		] as const) {
-			const fw = FIELD_WEIGHTS[fieldType];
-			const wc = fieldWordCounts[fieldType];
-			if (fw <= 0 || wc === 0) continue;
-
-			// Exact unigram/phrase match — higher value.
-			const idx = findWordIndex(term, wordList);
-			if (idx >= 0) {
-				const raw = fw * positionMult(idx / wc);
-				best = Math.max(best, raw);
-				continue;
-			}
-
-			// N-gram / partial match — slightly lower.
-			const ngIdx = findNgramIndex(term, ngramList);
-			if (ngIdx >= 0) {
-				const raw = fw * 0.5 * positionMult(ngIdx / wc);
-				best = Math.max(best, raw);
-			}
-		}
-
-		bestPerTerm.set(term, best);
-		totalUnscaled += best;
-	}
-
-	if (totalUnscaled === 0) return 0;
-
-	// Count how many terms actually contributed (have a positive best score).
-	let matchedTerms = 0;
-	for (const v of bestPerTerm.values()) if (v > 0) matchedTerms++;
-
-	// Each additional matched term beyond the first adds 15% of the top score,
-	// capped at +45 % (i.e. three bonus terms).
-	const topScore = Math.max(...bestPerTerm.values());
-	const extraTerms = Math.min(matchedTerms - 1, 3);
-	const termBonus = 1 + (extraTerms * 0.15);
-
-	return Math.round(totalUnscaled * termBonus);
-}
-
-/** Score all articles and return them sorted by relevance score (descending). */
-function scoreAndSortArticles(articles: Article[], searchTerms: string[]): Article[] {
-	if (articles.length === 0) return articles;
-
-	const scored: ArticleScore[] = articles.map(a => ({
-		article: a,
-		score: scoreArticle(a, searchTerms),
-	}));
+	// ── Phase 2: score ────────────────────────────────────────────────────────
+	const scored = await scoreCandidateArticles(candidates, searchTerms, useNgrams);
 
 	scored.sort((a, b) => b.score - a.score);
-	return scored.map(s => s.article);
+	const sorted = scored.map(s => s.article);
+	return { articles: sorted.slice(offset, offset + limit), hasMore: offset + limit < sorted.length };
 }
 
 // ── Search history helpers ─────────────────────────────────────────────────────
@@ -631,22 +1034,26 @@ export async function getSearchSuggestions(
 	if (!query || query.length < 1) return [];
 
 	const lowerQuery = query.toLowerCase();
-	const allArticles = await db.articles.where('userId').equals(userId).toArray();
-
-	// word → frequency
+	// Load all words for this user's articles via the linker tables
+	const allWordLinks = await db.articleWords.toArray();
+	// wordId → frequency
 	const wordFreq = new Map<string, number>();
-	// phrase (space-joined n-gram) → frequency
-	const phraseFreq = new Map<string, number>();
-
-	const addWord = (w: string) => {
-		const lw = w.toLowerCase();
+	const addWordId = (wordId: string) => {
+		const lw = wordId.toLowerCase();
 		wordFreq.set(lw, (wordFreq.get(lw) || 0) + 1);
 	};
 
-	for (const article of allArticles) {
-		for (const w of article.titleWords || []) addWord(w);
-		for (const w of article.snippetWords || []) addWord(w);
-		for (const w of article.siteContentWords || []) addWord(w);
+	// Each word-link row already carries the article id; however we do not have
+	// the userId here from the linker alone. Since wordFreq is built from ALL
+	// word-links in the DB (IndexedDB is local to the profile, there is a single
+	// set of tables), use the article-user mapping to filter.
+	const articlesForUser = await db.articles.where('userId').equals(userId).toArray();
+	const articleIdsForUser = new Set(articlesForUser.map(a => a.id).filter((id): id is number => id !== undefined));
+
+	for (const link of allWordLinks) {
+		if (articleIdsForUser.has(link.articleId)) {
+			addWordId(link.wordId);
+		}
 	}
 
 	// --- Phase 1: matching search-history items go first (highest priority) ---
@@ -671,9 +1078,9 @@ export async function getSearchSuggestions(
 
 	// --- Phase 2: frequent words that start with the query prefix ---
 	const wordMatches: Array<{ text: string; freq: number }> = [];
-	for (const [word, freq] of wordFreq) {
-		if (word.startsWith(lowerQuery) && word !== lowerQuery) {
-			wordMatches.push({ text: word, freq });
+	for (const [wordId, freq] of wordFreq) {
+		if (wordId.startsWith(lowerQuery) && wordId !== lowerQuery) {
+			wordMatches.push({ text: wordId, freq });
 		}
 	}
 

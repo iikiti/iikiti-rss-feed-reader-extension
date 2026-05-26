@@ -1,9 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { browser } from '$app/environment';
-import { db, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, searchArticles, getPaginatedArticles, getAllArticleCounts, type ArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption, type SearchOptions } from '$lib/db';
+import { db, type Article, getCurrentUserId, getAllUsers, setCurrentUserId, getPaginatedArticles, searchArticles, getAllArticleCounts, type ArticleCounts, updateFeedOrder, updateFolderOrder, type SortOption, type SearchOptions } from '$lib/db';
 import { fetchAndParseFeed } from '$lib/feed';
-import { segmentWords, generateAllNgrams, getSegmenter, normalizeLanguage } from '$lib/text-segmenter';
+import { normalizeLanguage } from '$lib/text-segmenter';
 import { SvelteSet } from 'svelte/reactivity';
 import {
 	Feed, Folder, View,
@@ -245,21 +245,6 @@ const filteredArticles = $derived(
 				if (filter.starred === 'starred' && !article.starred) return false;
 			}
 		}
-		if (searchQuery) {
-			const locale = searchLanguage ? normalizeLanguage(searchLanguage) : (article.language ? normalizeLanguage(article.language) : undefined);
-			const queryWords = segmentWords(searchQuery, locale);
-			const searchTerms = useNgrams
-				? [...new Set([...queryWords, ...generateAllNgrams(queryWords, 3)])]
-				: queryWords;
-			return searchTerms.length > 0 && (
-				article.titleWords?.some(w => searchTerms.some(sw => w.includes(sw))) ||
-				article.snippetWords?.some(w => searchTerms.some(sw => w.includes(sw))) ||
-				article.siteContentWords?.some(w => searchTerms.some(sw => w.includes(sw))) ||
-				(useNgrams && (article.titleNgrams?.some(n => searchTerms.some(sw => n.includes(sw))) ||
-				article.snippetNgrams?.some(n => searchTerms.some(sw => n.includes(sw))) ||
-				article.siteContentNgrams?.some(n => searchTerms.some(sw => n.includes(sw)))))
-			);
-		}
 		return true;
 	})
 );
@@ -345,36 +330,41 @@ async function loadData() {
 	const feedData = await db.feeds.where('userId').equals(currentUserId).toArray();
 	const folderData = await db.folders.where('userId').equals(currentUserId).toArray();
 	const viewData = await db.views.where('userId').equals(currentUserId).toArray();
-	
+
 	feeds = feedsFromData(feedData);
 	folders = foldersFromData(folderData);
 	views = viewsFromData(viewData);
-	
+
 	await loadAllCounts();
-	
+
 	articleOffset = 0;
 
-	if (searchQuery) {
-		const searchOptions: SearchOptions = {
+	let result: { articles: Article[]; hasMore: boolean };
+	if (searchQuery.trim()) {
+		const searchLocale = searchLanguage
+			? normalizeLanguage(searchLanguage)
+			: undefined;
+		result = await searchArticles(currentUserId, searchQuery.trim(), {
+			feedId: selectedFeedId ?? undefined,
+			read: undefined,
+			starred: undefined,
 			limit: 25,
 			offset: 0,
 			useNgrams,
-			language: searchLanguage || undefined
-		};
-		const searchResults = await searchArticles(currentUserId, searchQuery, searchOptions);
-		articles = searchResults;
-		hasMoreArticles = searchResults.length >= 25;
+			language: searchLocale,
+		} satisfies SearchOptions);
 	} else {
-		const result = await getPaginatedArticles(currentUserId, { 
+		result = await getPaginatedArticles(currentUserId, {
 			feedId: selectedFeedId ?? undefined,
 			folderId: selectedFolderId ?? undefined,
 			sortBy,
 			limit: 25,
-			offset: 0
+			offset: 0,
+			searchQuery,
 		});
-		articles = result.articles;
-		hasMoreArticles = result.hasMore;
 	}
+	articles = result.articles;
+	hasMoreArticles = result.hasMore;
 }
 
 async function loadMore() {
@@ -383,27 +373,32 @@ async function loadMore() {
 	isLoadingMore = true;
 	const nextOffset = articleOffset + 25;
 
-	if (searchQuery) {
-		const searchOptions: SearchOptions = {
+	let result: { articles: Article[]; hasMore: boolean };
+	if (searchQuery.trim()) {
+		const searchLocale = searchLanguage
+			? normalizeLanguage(searchLanguage)
+			: undefined;
+		result = await searchArticles(currentUserId, searchQuery.trim(), {
+			feedId: selectedFeedId ?? undefined,
+			read: undefined,
+			starred: undefined,
 			limit: 25,
 			offset: nextOffset,
 			useNgrams,
-			language: searchLanguage || undefined
-		};
-		const moreResults = await searchArticles(currentUserId, searchQuery, searchOptions);
-		articles = [...articles, ...moreResults];
-		hasMoreArticles = moreResults.length >= 25;
+			language: searchLocale,
+		} satisfies SearchOptions);
 	} else {
-		const result = await getPaginatedArticles(currentUserId, {
+		result = await getPaginatedArticles(currentUserId, {
 			feedId: selectedFeedId ?? undefined,
 			folderId: selectedFolderId ?? undefined,
 			sortBy,
 			limit: 25,
-			offset: nextOffset
+			offset: nextOffset,
+			searchQuery,
 		});
-		articles = [...articles, ...result.articles];
-		hasMoreArticles = result.hasMore;
 	}
+	articles = [...articles, ...result.articles];
+	hasMoreArticles = result.hasMore;
 	
 	articleOffset = nextOffset;
 	isLoadingMore = false;
