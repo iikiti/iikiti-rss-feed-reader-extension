@@ -551,7 +551,9 @@ async function collectCandidateArticleIds(
 
 	for (const term of wordTerms) {
 		for (const field of searchableFields) {
-			let coll = db.articles.where(field).equals(term).and(a => a.userId === userId);
+			let coll = useNgrams
+				? db.articles.where(field).startsWith(term).and(a => a.userId === userId)
+				: db.articles.where(field).equals(term).and(a => a.userId === userId);
 			if (options.feedId !== undefined) coll = coll.and(a => a.feedId === options.feedId);
 			if (options.read !== undefined) coll = coll.and(a => a.read === options.read);
 			if (options.starred !== undefined) coll = coll.and(a => a.starred === options.starred);
@@ -627,6 +629,15 @@ async function scoreCandidateArticles(
 					const raw = fw * positionMult(exactIdx / wc);
 					best = Math.max(best, raw);
 					continue;
+				}
+
+				if (useNgrams && termTokens.length === 1) {
+					const partialIdx = wordsInField.findIndex(w => w.startsWith(term));
+					if (partialIdx >= 0) {
+						const raw = fw * 0.75 * positionMult(partialIdx / wc);
+						best = Math.max(best, raw);
+						continue;
+					}
 				}
 
 				if (!useNgrams || termTokens.length === 1) continue;
