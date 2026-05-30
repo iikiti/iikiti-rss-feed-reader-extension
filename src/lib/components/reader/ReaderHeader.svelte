@@ -77,20 +77,25 @@
 	function acceptSuggestion(word: string) {
 		inputQuery = word;
 		activeSuggest = -1;
+		suggestions = [];
 		handleSearchQueryChange(word);
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
-		if (suggestions.length === 0) return;
-		if (event.key === 'ArrowDown') {
+		if (event.key === 'ArrowDown' && suggestions.length > 0) {
 			event.preventDefault();
 			activeSuggest = Math.min(activeSuggest + 1, suggestions.length - 1);
-		} else if (event.key === 'ArrowUp') {
+		} else if (event.key === 'ArrowUp' && suggestions.length > 0) {
 			event.preventDefault();
 			activeSuggest = Math.max(activeSuggest - 1, -1);
-		} else if (event.key === 'Enter' && activeSuggest >= 0) {
-			event.preventDefault();
-			acceptSuggestion(suggestions[activeSuggest]);
+		} else if (event.key === 'Enter') {
+			if (activeSuggest >= 0 && suggestions.length > 0) {
+				event.preventDefault();
+				acceptSuggestion(suggestions[activeSuggest]);
+			} else {
+				suggestions = [];
+				activeSuggest = -1;
+			}
 		} else if (event.key === 'Escape') {
 			activeSuggest = -1;
 		}
@@ -110,6 +115,10 @@
 				value={inputQuery}
 				oninput={handleInput}
 				onkeydown={handleKeydown}
+				onblur={() => {
+					suggestions = [];
+					activeSuggest = -1;
+				}}
 				class="border rounded px-3 py-1 bg-gray-50 dark:bg-gray-700"
 			/>
 			{#if suggestions.length > 0}
