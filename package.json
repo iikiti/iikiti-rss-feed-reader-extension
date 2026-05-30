@@ -23,7 +23,7 @@
 		"autoprefixer": "^10.5.0",
 		"esbuild": "^0.27.7",
 		"postcss": "^8.5.15",
-		"svelte": "^5.55.9",
+		"svelte": "^5.56.0",
 		"svelte-check": "^4.4.8",
 		"tailwindcss": "^3.4.19",
 		"tiny-glob": "^0.2.9",
