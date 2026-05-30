@@ -64,6 +64,8 @@ export enum FieldType {
 	siteContent
 }
 
+const FIELD_TYPES: FieldType[] = [FieldType.title, FieldType.snippet, FieldType.siteContent];
+
 const onCreatingOrUpdatingArticle =
 	function (
 		this: { onsuccess: Function, onerror: Function },
@@ -264,9 +266,9 @@ function getArticleWordLists(article: Article): Record<FieldType, string[]> {
 // Maximum position considered for scoring position bonus
 const MAX_POSITIONS: Record<FieldType, number> = {} as Record<FieldType, number>;
 
-await Promise.all((Object.values(FieldType) as FieldType[]).map(async (fieldType) => {
+FIELD_TYPES.forEach((fieldType) => {
 	MAX_POSITIONS[fieldType] = 0;
-}));
+});
 
 /**
  * Builds a helper object whose `getOccurrence(fieldType, term)` method returns
@@ -612,7 +614,7 @@ async function scoreCandidateArticles(
 			const termTokens = term.split(' ').filter(Boolean);
 			let best = 0;
 
-			for (const fieldType of Object.values(FieldType) as FieldType[]) {
+			for (const fieldType of FIELD_TYPES) {
 				const fw = FIELD_WEIGHTS[fieldType];
 				const wordsInField = fieldWordArrays[fieldType];
 				const wc = wordCounts[fieldType];
